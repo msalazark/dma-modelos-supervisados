@@ -7,12 +7,15 @@ import pandas as pd
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
+from sklearn.ensemble import (RandomForestClassifier, GradientBoostingRegressor,
+                              GradientBoostingClassifier)
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import (accuracy_score, precision_score, recall_score,
                               f1_score, roc_auc_score, roc_curve,
                               confusion_matrix, mean_squared_error,
                               mean_absolute_error, r2_score)
+from sklearn.cluster import KMeans, AgglomerativeClustering
+from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -247,6 +250,157 @@ def run_basket(df, min_support=0.05, min_confidence=0.3, min_lift=1.0):
     except Exception as e:
         return {'error': str(e), 'rules': pd.DataFrame()}
 
+# ── PROPENSIÓN A COMPRA ────────────────────────────────────────────
+def run_propension(df):
+    features = ['recencia_dias', 'n_compras_12m', 'engagement_score',
+                'canal_digital', 'edad', 'n_productos']
+    target = 'compro'
+    feats_available = [f for f in features if f in df.columns]
+    if target not in df.columns:
+        return None
+    X = df[feats_available].fillna(0)
+    y = df[target].astype(int)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, stratify=y, random_state=42)
+
+    model = GradientBoostingClassifier(n_estimators=150, max_depth=4,
+                                        learning_rate=0.1, random_state=42)
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
+
+    fpr, tpr, _ = roc_curve(y_test, y_prob)
+    cm = confusion_matrix(y_test, y_pred)
+    return {
+        'model': model,
+        'features': feats_available,
+        'X_train': X_train, 'X_test': X_test,
+        'y_train': y_train, 'y_test': y_test,
+        'y_pred': y_pred, 'y_prob': y_prob,
+        'metrics': {
+            'accuracy': accuracy_score(y_test, y_pred),
+            'precision': precision_score(y_test, y_pred, zero_division=0),
+            'recall': recall_score(y_test, y_pred, zero_division=0),
+            'f1': f1_score(y_test, y_pred, zero_division=0),
+            'auc_roc': roc_auc_score(y_test, y_prob),
+        },
+        'confusion_matrix': cm,
+        'roc': {'fpr': fpr, 'tpr': tpr},
+        'feature_importance': dict(zip(feats_available, model.feature_importances_)),
+        'conv_rate': y.mean(),
+        'train_size': len(X_train),
+        'test_size': len(X_test),
+    }
+
+# ── WIN / LOSS DE OPORTUNIDADES ────────────────────────────────────
+def run_winloss(df):
+    features = ['monto_oportunidad_k', 'dias_ciclo', 'n_reuniones',
+                'n_competidores', 'decision_makers', 'propuesta_personalizada']
+    target = 'ganado'
+    feats_available = [f for f in features if f in df.columns]
+    if target not in df.columns:
+        return None
+    X = df[feats_available].fillna(0)
+    y = df[target].astype(int)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, stratify=y, random_state=42)
+
+    model = RandomForestClassifier(n_estimators=200, max_depth=6,
+                                   random_state=42, class_weight='balanced')
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
+
+    fpr, tpr, _ = roc_curve(y_test, y_prob)
+    cm = confusion_matrix(y_test, y_pred)
+    return {
+        'model': model,
+        'features': feats_available,
+        'X_train': X_train, 'X_test': X_test,
+        'y_train': y_train, 'y_test': y_test,
+        'y_pred': y_pred, 'y_prob': y_prob,
+        'metrics': {
+            'accuracy': accuracy_score(y_test, y_pred),
+            'precision': precision_score(y_test, y_pred, zero_division=0),
+            'recall': recall_score(y_test, y_pred, zero_division=0),
+            'f1': f1_score(y_test, y_pred, zero_division=0),
+            'auc_roc': roc_auc_score(y_test, y_prob),
+        },
+        'confusion_matrix': cm,
+        'roc': {'fpr': fpr, 'tpr': tpr},
+        'feature_importance': dict(zip(feats_available, model.feature_importances_)),
+        'win_rate': y.mean(),
+        'train_size': len(X_train),
+        'test_size': len(X_test),
+    }
+
+# ── UPLIFT / INCREMENTALIDAD ────────────────────────────────────────
+def run_uplift(df):
+    features = ['edad', 'recencia_dias', 'n_compras_prev', 'ticket_prom_k', 'canal_digital']
+    treatment_col = 'tratamiento'
+    target = 'convirtio'
+    feats_available = [f for f in features if f in df.columns]
+    if target not in df.columns or treatment_col not in df.columns:
+        return None
+
+    treated = df[df[treatment_col] == 1].copy()
+    control = df[df[treatment_col] == 0].copy()
+
+    scaler = StandardScaler()
+    X_all = scaler.fit_transform(df[feats_available].fillna(0))
+    X_t = scaler.transform(treated[feats_available].fillna(0))
+    X_c = scaler.transform(control[feats_available].fillna(0))
+
+    model_t = LogisticRegression(C=1.0, max_iter=300, random_state=42)
+    model_c = LogisticRegression(C=1.0, max_iter=300, random_state=42)
+    model_t.fit(X_t, treated[target].astype(int))
+    model_c.fit(X_c, control[target].astype(int))
+
+    p_treat = model_t.predict_proba(X_all)[:, 1]
+    p_control = model_c.predict_proba(X_all)[:, 1]
+    uplift_scores = p_treat - p_control
+
+    df_scored = df[feats_available + [treatment_col, target]].copy()
+    df_scored['p_treated'] = p_treat
+    df_scored['p_control'] = p_control
+    df_scored['uplift_score'] = uplift_scores
+    df_scored['decil'] = pd.qcut(
+        uplift_scores, 10,
+        labels=[f'D{i}' for i in range(1, 11)],
+        duplicates='drop'
+    )
+
+    ate = float(uplift_scores.mean())
+    top10_n = max(1, len(uplift_scores) // 10)
+    top10_lift = float(uplift_scores[np.argsort(uplift_scores)[::-1][:top10_n]].mean())
+
+    # Qini coefficient
+    rank = np.argsort(uplift_scores)[::-1]
+    cum_conv = np.cumsum(df_scored[target].values[rank])
+    random_line = np.linspace(0, cum_conv[-1], len(cum_conv))
+    qini = float((cum_conv - random_line).sum() / len(cum_conv))
+
+    decile_summary = (df_scored.groupby('decil', observed=True)['uplift_score']
+                      .mean().reset_index()
+                      .rename(columns={'uplift_score': 'uplift_medio'}))
+
+    return {
+        'model_t': model_t,
+        'model_c': model_c,
+        'scaler': scaler,
+        'features': feats_available,
+        'df_scored': df_scored,
+        'decile_summary': decile_summary,
+        'metrics': {
+            'ate': round(ate, 4),
+            'top10_lift': round(top10_lift, 4),
+            'qini': round(qini, 4),
+        },
+        'uplift_scores': uplift_scores,
+        'train_size': len(treated),
+        'test_size': len(control),
+    }
+
 # ── NEXT BEST OFFER ────────────────────────────────────────────────
 def run_nbo(df):
     features = ['tiene_tarjeta', 'tiene_cuenta', 'tiene_seguro',
@@ -289,4 +443,156 @@ def run_nbo(df):
                                         model.feature_importances_)),
         'train_size': len(X_train),
         'test_size': len(X_test),
+    }
+
+# ── K-MEANS (RFM) ──────────────────────────────────────────────────
+def run_kmeans(df: pd.DataFrame, n_clusters: int = 4) -> dict:
+    features = ['recencia_dias', 'frecuencia_compras', 'monto_total_k']
+    feats = [f for f in features if f in df.columns]
+    if len(feats) < 2:
+        return {'error': 'Columnas RFM no encontradas'}
+
+    X_raw = df[feats].fillna(0).values
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X_raw)
+
+    # Curva de codo: entrenar k=2..9
+    elbow = []
+    for k in range(2, 10):
+        km_tmp = KMeans(n_clusters=k, init='k-means++', n_init=10, random_state=42)
+        km_tmp.fit(X)
+        elbow.append({'k': k, 'inertia': km_tmp.inertia_})
+
+    km = KMeans(n_clusters=n_clusters, init='k-means++', n_init=20, random_state=42)
+    labels = km.fit_predict(X)
+
+    sil  = silhouette_score(X, labels)
+    ch   = calinski_harabasz_score(X, labels)
+    db   = davies_bouldin_score(X, labels)
+
+    df_scored = df.copy()
+    df_scored['cluster'] = labels
+    df_scored['cluster_label'] = [f'Cluster {l+1}' for l in labels]
+
+    centroids_scaled = km.cluster_centers_
+    centroids_real   = scaler.inverse_transform(centroids_scaled)
+    profiles = pd.DataFrame(centroids_real, columns=feats)
+    profiles.insert(0, 'cluster', [f'Cluster {i+1}' for i in range(n_clusters)])
+    profiles['n'] = pd.Series(labels).value_counts().sort_index().values
+
+    return {
+        'model': km, 'scaler': scaler, 'features': feats,
+        'labels': labels, 'df_scored': df_scored,
+        'cluster_profiles': profiles,
+        'elbow_data': pd.DataFrame(elbow),
+        'metrics': {
+            'silhouette': round(sil, 4),
+            'inertia': round(km.inertia_, 2),
+            'calinski_harabasz': round(ch, 2),
+            'davies_bouldin': round(db, 4),
+            'n_clusters': n_clusters,
+        },
+        'train_size': len(df), 'test_size': 0,
+    }
+
+# ── K-MODES ────────────────────────────────────────────────────────
+def run_kmodes(df: pd.DataFrame, n_clusters: int = 3) -> dict:
+    try:
+        from kmodes.kmodes import KModes
+    except ImportError:
+        return {'error': 'Instala el paquete: pip install kmodes'}
+
+    features = ['canal_adquisicion', 'categoria_preferida', 'frecuencia_visita',
+                'region', 'edad_grupo', 'dispositivo']
+    feats = [f for f in features if f in df.columns]
+    if len(feats) < 2:
+        return {'error': 'Columnas categóricas no encontradas'}
+
+    X = df[feats].fillna('Desconocido').values
+
+    # Curva de costo
+    elbow = []
+    for k in range(2, 7):
+        km_tmp = KModes(n_clusters=k, init='Huang', n_init=5, random_state=42)
+        km_tmp.fit(X)
+        elbow.append({'k': k, 'cost': km_tmp.cost_})
+
+    km = KModes(n_clusters=n_clusters, init='Huang', n_init=10, random_state=42)
+    labels = km.fit_predict(X)
+
+    df_scored = df.copy()
+    df_scored['cluster'] = labels
+    df_scored['cluster_label'] = [f'Perfil {l+1}' for l in labels]
+
+    modes_df = pd.DataFrame(km.cluster_centroids_, columns=feats)
+    modes_df.insert(0, 'cluster', [f'Perfil {i+1}' for i in range(n_clusters)])
+    sizes = pd.Series(labels).value_counts().sort_index()
+    modes_df['n'] = sizes.values
+
+    # Distribución de features por cluster
+    profiles_detail = {}
+    for feat in feats:
+        profiles_detail[feat] = df_scored.groupby('cluster_label')[feat].apply(
+            lambda x: x.value_counts(normalize=True).head(3).to_dict()
+        ).to_dict()
+
+    return {
+        'model': km, 'features': feats,
+        'labels': labels, 'df_scored': df_scored,
+        'cluster_modes': modes_df,
+        'profiles_detail': profiles_detail,
+        'elbow_data': pd.DataFrame(elbow),
+        'metrics': {
+            'cost': round(km.cost_, 2),
+            'n_clusters': n_clusters,
+        },
+        'train_size': len(df), 'test_size': 0,
+    }
+
+# ── CLUSTERING JERÁRQUICO ──────────────────────────────────────────
+def run_hierarchical(df: pd.DataFrame, n_clusters: int = 4,
+                     linkage: str = 'ward') -> dict:
+    from scipy.cluster.hierarchy import linkage as sp_linkage, cophenet
+    from scipy.spatial.distance import pdist
+
+    features = ['recencia_dias', 'frecuencia_compras', 'ticket_prom_k',
+                'n_categorias', 'meses_cliente', 'canal_digital']
+    feats = [f for f in features if f in df.columns]
+    if len(feats) < 2:
+        return {'error': 'Columnas de comportamiento no encontradas'}
+
+    X_raw = df[feats].fillna(0).values
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X_raw)
+
+    # Matriz de enlace para dendrograma
+    Z = sp_linkage(X, method=linkage)
+    c, _ = cophenet(Z, pdist(X))
+
+    model = AgglomerativeClustering(n_clusters=n_clusters, linkage=linkage)
+    labels = model.fit_predict(X)
+
+    sil = silhouette_score(X, labels)
+    ch  = calinski_harabasz_score(X, labels)
+
+    df_scored = df.copy()
+    df_scored['cluster'] = labels
+    df_scored['cluster_label'] = [f'Segmento {l+1}' for l in labels]
+
+    profiles = df_scored.groupby('cluster')[feats].mean().round(2)
+    profiles.index = [f'Segmento {i+1}' for i in profiles.index]
+    profiles['n'] = pd.Series(labels).value_counts().sort_index().values
+
+    return {
+        'model': model, 'scaler': scaler, 'features': feats,
+        'labels': labels, 'df_scored': df_scored,
+        'cluster_profiles': profiles.reset_index().rename(columns={'index': 'cluster'}),
+        'linkage_matrix': Z,
+        'metrics': {
+            'silhouette': round(sil, 4),
+            'cophenetic': round(float(c), 4),
+            'calinski_harabasz': round(ch, 2),
+            'n_clusters': n_clusters,
+        },
+        'train_size': len(df), 'test_size': 0,
     }

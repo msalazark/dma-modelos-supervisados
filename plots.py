@@ -231,6 +231,176 @@ def plot_basket_lift(rules_df, top_n=10):
                       yaxis=dict(showgrid=False))
     return fig
 
+def plot_elbow_curve(elbow_df, metric='inertia', label='Inercia'):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=elbow_df['k'], y=elbow_df[metric],
+        mode='lines+markers',
+        line=dict(color=PALETTE['blue'], width=2.5),
+        marker=dict(size=8, color=PALETTE['blue'])
+    ))
+    fig.update_layout(
+        title=f'Curva de codo — {label} vs número de clusters',
+        xaxis_title='Número de clusters (k)',
+        yaxis_title=label,
+        height=320, margin=dict(t=40,b=20,l=20,r=20),
+        plot_bgcolor='white', paper_bgcolor='white',
+        font_family='DM Sans',
+        xaxis=dict(dtick=1, gridcolor='#f0f0f0'),
+        yaxis=dict(gridcolor='#f0f0f0')
+    )
+    return fig
+
+def plot_cluster_profiles(profiles_df, feature_cols):
+    df = profiles_df.copy()
+    cluster_col = 'cluster'
+    colors = [PALETTE['blue'], PALETTE['teal'], PALETTE['red'],
+              PALETTE['orange'], PALETTE['purple'], PALETTE['green']]
+    fig = go.Figure()
+    for i, row in df.iterrows():
+        vals = [row[c] for c in feature_cols]
+        fig.add_trace(go.Bar(
+            name=str(row[cluster_col]),
+            x=feature_cols, y=vals,
+            marker_color=colors[i % len(colors)],
+            text=[f'{v:.1f}' for v in vals],
+            textposition='outside'
+        ))
+    fig.update_layout(
+        barmode='group',
+        title='Perfil medio por cluster',
+        height=380, margin=dict(t=40,b=20,l=20,r=20),
+        plot_bgcolor='white', paper_bgcolor='white',
+        font_family='DM Sans',
+        xaxis=dict(showgrid=False),
+        yaxis=dict(gridcolor='#f0f0f0')
+    )
+    return fig
+
+def plot_cluster_scatter_3d(df_scored, x_col, y_col, z_col, cluster_col='cluster_label'):
+    colors = [PALETTE['blue'], PALETTE['teal'], PALETTE['red'],
+              PALETTE['orange'], PALETTE['purple'], PALETTE['green']]
+    fig = go.Figure()
+    for i, cluster in enumerate(sorted(df_scored[cluster_col].unique())):
+        sub = df_scored[df_scored[cluster_col] == cluster]
+        fig.add_trace(go.Scatter3d(
+            x=sub[x_col], y=sub[y_col], z=sub[z_col],
+            mode='markers', name=str(cluster),
+            marker=dict(size=4, color=colors[i % len(colors)], opacity=0.7)
+        ))
+    fig.update_layout(
+        scene=dict(
+            xaxis_title=x_col, yaxis_title=y_col, zaxis_title=z_col,
+            bgcolor='white'
+        ),
+        title='Distribución 3D de clusters (RFM)',
+        height=460, margin=dict(t=40,b=0,l=0,r=0),
+        paper_bgcolor='white', font_family='DM Sans'
+    )
+    return fig
+
+def plot_cluster_scatter_2d(df_scored, x_col, y_col, cluster_col='cluster_label'):
+    fig = px.scatter(
+        df_scored, x=x_col, y=y_col, color=cluster_col,
+        color_discrete_sequence=list(PALETTE.values()),
+        opacity=0.7, title=f'{x_col} vs {y_col} por cluster'
+    )
+    fig.update_layout(
+        height=380, margin=dict(t=40,b=20,l=20,r=20),
+        plot_bgcolor='white', paper_bgcolor='white',
+        font_family='DM Sans',
+        xaxis=dict(gridcolor='#f0f0f0'),
+        yaxis=dict(gridcolor='#f0f0f0')
+    )
+    return fig
+
+def plot_dendrogram(Z, n_last: int = 40):
+    import plotly.figure_factory as ff
+    fig = ff.create_dendrogram(
+        Z, orientation='bottom',
+        color_threshold=0.7 * max(Z[:, 2]),
+        colorscale=[PALETTE['blue'], PALETTE['teal'],
+                    PALETTE['red'], PALETTE['orange'],
+                    PALETTE['purple']]
+    )
+    fig.update_layout(
+        title='Dendrograma — distancias de fusión entre clusters',
+        height=380, margin=dict(t=40,b=20,l=20,r=20),
+        paper_bgcolor='white', font_family='DM Sans',
+        xaxis=dict(showticklabels=False, title='Observaciones'),
+        yaxis=dict(title='Distancia', gridcolor='#f0f0f0')
+    )
+    return fig
+
+def plot_kmodes_heatmap(profiles_detail: dict, features: list):
+    """Heatmap de valores más frecuentes por cluster y feature."""
+    clusters = list(list(profiles_detail.values())[0].keys())
+    rows, text_vals = [], []
+    for feat in features:
+        row, txt = [], []
+        for cl in clusters:
+            top = profiles_detail[feat].get(cl, {})
+            # Asegurar que top es un diccionario
+            if not isinstance(top, dict):
+                top = {}
+            top_val = max(top, key=top.get) if top else '—'
+            top_pct = top.get(top_val, 0) if isinstance(top_val, str) or top_val != '—' else 0
+            row.append(top_pct)
+            txt.append(f'{top_val}<br>{top_pct:.0%}')
+        rows.append(row)
+        text_vals.append(txt)
+    fig = go.Figure(go.Heatmap(
+        z=rows, x=clusters, y=features,
+        text=text_vals, texttemplate='%{text}',
+        colorscale='teal', showscale=False
+    ))
+    fig.update_layout(
+        title='Valor dominante por cluster y variable (K-Modes)',
+        height=max(280, len(features)*50),
+        margin=dict(t=40,b=20,l=20,r=20),
+        paper_bgcolor='white', font_family='DM Sans'
+    )
+    return fig
+
+def plot_uplift_by_decile(decile_df):
+    colors = [PALETTE['teal'] if u > 0 else PALETTE['red']
+              for u in decile_df['uplift_medio']]
+    fig = go.Figure(go.Bar(
+        x=decile_df['decil'].astype(str),
+        y=decile_df['uplift_medio'],
+        marker_color=colors,
+        text=[f'{u:+.3f}' for u in decile_df['uplift_medio']],
+        textposition='outside'
+    ))
+    fig.update_layout(
+        title='Uplift medio por decil (D10 = mayor incrementalidad)',
+        height=320, margin=dict(t=40, b=20, l=20, r=20),
+        plot_bgcolor='white', paper_bgcolor='white',
+        font_family='DM Sans',
+        xaxis=dict(title='Decil de uplift', showgrid=False),
+        yaxis=dict(title='Uplift score medio', gridcolor='#f0f0f0',
+                   zeroline=True, zerolinecolor='#aaa')
+    )
+    return fig
+
+def plot_uplift_distribution(df_scored):
+    fig = go.Figure()
+    for treat_val, label, color in [(1, 'Grupo tratado', PALETTE['blue']),
+                                     (0, 'Grupo control', PALETTE['gray'])]:
+        sub = df_scored[df_scored['tratamiento'] == treat_val]['uplift_score']
+        fig.add_trace(go.Histogram(x=sub, name=label, opacity=0.7,
+                                    marker_color=color, nbinsx=25))
+    fig.update_layout(
+        title='Distribución de uplift scores por grupo',
+        barmode='overlay', height=300,
+        margin=dict(t=40, b=20, l=20, r=20),
+        plot_bgcolor='white', paper_bgcolor='white',
+        font_family='DM Sans',
+        xaxis=dict(title='Uplift score', gridcolor='#f0f0f0'),
+        yaxis=dict(title='Frecuencia', gridcolor='#f0f0f0')
+    )
+    return fig
+
 def plot_nbo_probs(classes, probs_mean):
     df = pd.DataFrame({'producto': classes, 'prob': probs_mean})
     df = df.sort_values('prob', ascending=True)

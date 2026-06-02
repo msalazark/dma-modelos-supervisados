@@ -136,6 +136,164 @@ def gen_nbo():
                      'segmento': segmento, 'producto_adquirido': prod})
     return pd.DataFrame(rows)
 
+def gen_propension():
+    recencia = np.random.randint(1, 121, N)
+    n_compras = np.random.poisson(4, N).clip(0, 15)
+    engagement = np.random.randint(10, 101, N)
+    canal_digital = (np.random.random(N) > 0.35).astype(int)
+    edad = np.random.randint(22, 65, N)
+    n_productos = np.random.randint(1, 6, N)
+    z = (-2.5 - 0.025*recencia + 0.22*n_compras
+         + 0.035*engagement + 0.8*canal_digital
+         + 0.3*n_productos + np.random.normal(0, 0.8, N))
+    prob = 1 / (1 + np.exp(-z))
+    compro = (prob > 0.5).astype(int)
+    return pd.DataFrame({
+        'cliente_id': range(1, N+1),
+        'recencia_dias': recencia,
+        'n_compras_12m': n_compras,
+        'engagement_score': engagement,
+        'canal_digital': canal_digital,
+        'edad': edad,
+        'n_productos': n_productos,
+        'compro': compro
+    })
+
+def gen_winloss():
+    monto = np.round(np.random.lognormal(4.5, 0.8, N)).clip(10, 500).astype(int)
+    dias_ciclo = np.random.randint(7, 181, N)
+    n_reuniones = np.random.randint(1, 11, N)
+    n_competidores = np.random.randint(0, 5, N)
+    decision_makers = np.random.randint(1, 6, N)
+    propuesta = (np.random.random(N) > 0.45).astype(int)
+    z = (-1.0 + 0.004*monto + 0.3*n_reuniones
+         - 0.4*n_competidores + 0.6*propuesta
+         + 0.15*decision_makers - 0.008*dias_ciclo
+         + np.random.normal(0, 0.9, N))
+    prob = 1 / (1 + np.exp(-z))
+    ganado = (prob > 0.5).astype(int)
+    return pd.DataFrame({
+        'oportunidad_id': range(1, N+1),
+        'monto_oportunidad_k': monto,
+        'dias_ciclo': dias_ciclo,
+        'n_reuniones': n_reuniones,
+        'n_competidores': n_competidores,
+        'decision_makers': decision_makers,
+        'propuesta_personalizada': propuesta,
+        'ganado': ganado
+    })
+
+def gen_uplift():
+    N2 = 500
+    edad = np.random.randint(20, 65, N2)
+    recencia = np.random.randint(1, 91, N2)
+    n_compras = np.random.poisson(3, N2).clip(0, 12)
+    ticket = np.round(np.random.lognormal(1.5, 0.6, N2), 1).clip(0.5, 20)
+    canal_digital = (np.random.random(N2) > 0.4).astype(int)
+    tratamiento = (np.random.random(N2) > 0.5).astype(int)
+    base_z = -2.5 + 0.12*n_compras + 0.04*ticket - 0.01*recencia
+    base_prob = 1 / (1 + np.exp(-base_z))
+    treatment_effect = (0.20*(n_compras/12) + 0.10*canal_digital
+                        + np.random.normal(0, 0.05, N2)).clip(0, 0.5)
+    conv_prob = np.where(tratamiento == 1,
+                         np.minimum(base_prob + treatment_effect, 1.0),
+                         base_prob)
+    convirtio = (np.random.random(N2) < conv_prob).astype(int)
+    return pd.DataFrame({
+        'cliente_id': range(1, N2+1),
+        'edad': edad,
+        'recencia_dias': recencia,
+        'n_compras_prev': n_compras,
+        'ticket_prom_k': ticket,
+        'canal_digital': canal_digital,
+        'tratamiento': tratamiento,
+        'convirtio': convirtio
+    })
+
+def gen_rfm():
+    """RFM con 4 segmentos naturales para K-Means."""
+    perfiles = {
+        'champion':  {'rec': (8, 5),    'frec': (18, 4),  'monto': (18, 4)},
+        'at_risk':   {'rec': (65, 20),  'frec': (7, 3),   'monto': (7, 3)},
+        'lost':      {'rec': (130, 30), 'frec': (2, 1),   'monto': (2, 1)},
+        'potential': {'rec': (15, 8),   'frec': (4, 2),   'monto': (5, 2)},
+    }
+    probs = [0.20, 0.25, 0.30, 0.25]
+    segmentos = np.random.choice(list(perfiles.keys()), N, p=probs)
+    recencia   = np.array([max(1, int(np.random.normal(*perfiles[s]['rec'])))   for s in segmentos])
+    frecuencia = np.array([max(1, int(np.random.normal(*perfiles[s]['frec'])))  for s in segmentos])
+    monto      = np.array([max(0.5, round(np.random.normal(*perfiles[s]['monto']), 1)) for s in segmentos])
+    return pd.DataFrame({
+        'cliente_id':        range(1, N+1),
+        'recencia_dias':     recencia,
+        'frecuencia_compras': frecuencia,
+        'monto_total_k':     monto,
+        'segmento_rfm':      segmentos,
+    })
+
+def gen_kmodes_data():
+    """Perfiles de cliente 100% categóricos para K-Modes."""
+    perfiles_param = {
+        'digital_joven':    {'canal': (['Google Ads','Facebook'], [0.55,0.45]),
+                             'cat':   (['Tecnología','Moda','Deportes'], [0.50,0.30,0.20]),
+                             'freq':  (['Diaria','Semanal'], [0.35,0.65]),
+                             'region':(['Lima','Otra'], [0.80,0.20]),
+                             'edad':  (['18-24','25-34'], [0.40,0.60]),
+                             'device':(['Móvil','Tablet'], [0.85,0.15])},
+        'adulto_tradicional':{'canal': (['Email','Orgánico','Referido'], [0.45,0.35,0.20]),
+                             'cat':   (['Hogar','Libros','Tecnología'], [0.50,0.35,0.15]),
+                             'freq':  (['Mensual','Semanal'], [0.65,0.35]),
+                             'region':(['Lima','Arequipa','Otra'], [0.55,0.25,0.20]),
+                             'edad':  (['35-44','45-54','55+'], [0.40,0.35,0.25]),
+                             'device':(['Desktop','Móvil'], [0.70,0.30])},
+        'regional_esporadico':{'canal':(['Orgánico','Referido','Facebook'], [0.40,0.35,0.25]),
+                             'cat':   (['Deportes','Hogar','Moda'], [0.45,0.35,0.20]),
+                             'freq':  (['Esporádica','Mensual'], [0.60,0.40]),
+                             'region':(['Arequipa','Trujillo','Cusco','Otra'], [0.30,0.30,0.20,0.20]),
+                             'edad':  (['25-34','35-44'], [0.50,0.50]),
+                             'device':(['Móvil','Desktop'], [0.65,0.35])},
+    }
+    rows = []
+    for i in range(N):
+        p = np.random.choice(list(perfiles_param.keys()), p=[0.35, 0.35, 0.30])
+        pm = perfiles_param[p]
+        rows.append({
+            'cliente_id':           i + 1,
+            'canal_adquisicion':    np.random.choice(pm['canal'][0], p=pm['canal'][1]),
+            'categoria_preferida':  np.random.choice(pm['cat'][0],   p=pm['cat'][1]),
+            'frecuencia_visita':    np.random.choice(pm['freq'][0],  p=pm['freq'][1]),
+            'region':               np.random.choice(pm['region'][0],p=pm['region'][1]),
+            'edad_grupo':           np.random.choice(pm['edad'][0],  p=pm['edad'][1]),
+            'dispositivo':          np.random.choice(pm['device'][0],p=pm['device'][1]),
+            'perfil_real':          p,
+        })
+    return pd.DataFrame(rows)
+
+def gen_hierarchical():
+    """Comportamiento de cliente para clustering jerárquico."""
+    perfiles = {
+        'vip':         {'rec': (7, 4),    'frec': (20, 4),  'tick': (12, 3),  'cats': (5, 1),  'ant': (36, 8),  'dig': 0.90},
+        'regular':     {'rec': (30, 12),  'frec': (8, 3),   'tick': (5, 2),   'cats': (3, 1),  'ant': (18, 6),  'dig': 0.60},
+        'en_riesgo':   {'rec': (90, 20),  'frec': (3, 2),   'tick': (3, 1.5), 'cats': (2, 1),  'ant': (24, 8),  'dig': 0.35},
+        'nuevo':       {'rec': (10, 5),   'frec': (3, 2),   'tick': (4, 2),   'cats': (2, 1),  'ant': (4, 2),   'dig': 0.75},
+    }
+    rows = []
+    for seg, pm in perfiles.items():
+        n_seg = N // len(perfiles)
+        for _ in range(n_seg):
+            rows.append({
+                'recencia_dias':     max(1,  int(np.random.normal(pm['rec'][0],  pm['rec'][1]))),
+                'frecuencia_compras':max(1,  int(np.random.normal(pm['frec'][0], pm['frec'][1]))),
+                'ticket_prom_k':     max(0.5,round(np.random.normal(pm['tick'][0], pm['tick'][1]), 1)),
+                'n_categorias':      max(1,  int(np.random.normal(pm['cats'][0], pm['cats'][1]))),
+                'meses_cliente':     max(1,  int(np.random.normal(pm['ant'][0],  pm['ant'][1]))),
+                'canal_digital':     int(np.random.random() < pm['dig']),
+                'segmento_real':     seg,
+            })
+    df_h = pd.DataFrame(rows)
+    df_h.insert(0, 'cliente_id', range(1, len(df_h)+1))
+    return df_h.sample(frac=1, random_state=42).reset_index(drop=True)
+
 DATASETS = {
     'churn': gen_churn,
     'ltv': gen_ltv,
@@ -143,6 +301,12 @@ DATASETS = {
     'elasticity': gen_elasticity,
     'basket': gen_basket,
     'nbo': gen_nbo,
+    'propension': gen_propension,
+    'winloss': gen_winloss,
+    'uplift': gen_uplift,
+    'rfm': gen_rfm,
+    'kmodes': gen_kmodes_data,
+    'hierarchical': gen_hierarchical,
 }
 
 if __name__ == '__main__':
