@@ -355,7 +355,10 @@ with phases[1]:
     st.markdown('---')
     st.subheader('Estadísticas descriptivas')
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    st.dataframe(df[num_cols].describe().round(2), use_container_width=True)
+    if num_cols:
+        st.dataframe(df[num_cols].describe().round(2), use_container_width=True)
+    else:
+        st.info('No hay columnas numéricas en el dataset.')
 
     # Target distribution
     if cfg['target'] and cfg['target'] in df.columns:
@@ -364,14 +367,17 @@ with phases[1]:
         with c_td:
             st.subheader(f'Distribución del target: `{cfg["target"]}`')
             st.plotly_chart(P.plot_target_dist(df[cfg['target']], cfg['target']),
-                            use_container_width=True)
+                            use_container_width=True, key='eda_target_dist')
         with c_cb:
             st.subheader('Correlación con el target')
             num_feats = [f for f in cfg['features'] if f in df.columns
                          and pd.api.types.is_numeric_dtype(df[f])]
-            if num_feats:
+            target_is_numeric = pd.api.types.is_numeric_dtype(df[cfg['target']])
+            if num_feats and target_is_numeric:
                 st.plotly_chart(P.plot_correlation_bar(df, num_feats, cfg['target']),
-                                use_container_width=True)
+                                use_container_width=True, key='eda_corr_bar')
+            elif num_feats:
+                st.info('El target es categórico — correlación de Pearson no aplica.')
 
     # Histograms
     st.markdown('---')
@@ -380,7 +386,7 @@ with phases[1]:
                       if f in df.columns and pd.api.types.is_numeric_dtype(df[f])]
     if num_feats_plot:
         st.plotly_chart(P.plot_histograms(df, num_feats_plot),
-                        use_container_width=True)
+                        use_container_width=True, key='eda_histograms')
 
     # Boxplots by target for classification
     if cfg['target'] and cfg['target'] in df.columns and model_name != 'LTV · Regresión Lineal':
@@ -390,7 +396,7 @@ with phases[1]:
         if figs_box:
             cols_box = st.columns(min(2, len(figs_box)))
             for i, fig in enumerate(figs_box):
-                cols_box[i % 2].plotly_chart(fig, use_container_width=True)
+                cols_box[i % 2].plotly_chart(fig, use_container_width=True, key=f'eda_box_{i}')
 
     # Correlation matrix
     if len(num_feats_plot) > 2:
@@ -399,7 +405,7 @@ with phases[1]:
         all_num = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])
                    and c not in ['cliente_id','lead_id']][:10]
         st.plotly_chart(P.plot_correlation_heatmap(df, all_num),
-                        use_container_width=True)
+                        use_container_width=True, key='eda_corr_heatmap')
 
     # Category analysis
     cat_cols = [c for c in df.columns
@@ -407,11 +413,11 @@ with phases[1]:
     if cat_cols:
         st.markdown('---')
         st.subheader('Variables categóricas')
-        for cat in cat_cols[:3]:
+        for i, cat in enumerate(cat_cols[:3]):
             vc = df[cat].value_counts().reset_index()
             vc.columns = [cat, 'count']
             fig_cat = P.plot_target_dist(df[cat], cat)
-            st.plotly_chart(fig_cat, use_container_width=True)
+            st.plotly_chart(fig_cat, use_container_width=True, key=f'eda_cat_{i}')
 
 # ══════════════════════════════════════════════════════════════════
 # FASE 3: DATA PREPARATION
@@ -609,11 +615,11 @@ with phases[3]:
             if 'feature_importance' in result_now:
                 st.subheader('Importancia de variables')
                 st.plotly_chart(P.plot_feature_importance(result_now['feature_importance']),
-                                use_container_width=True)
+                                use_container_width=True, key='mod_feat_importance')
             elif 'coefficients' in result_now:
                 st.subheader('Coeficientes del modelo')
                 st.plotly_chart(P.plot_coeff_bar(result_now['coefficients']),
-                                use_container_width=True)
+                                use_container_width=True, key='mod_coeff_bar')
             elif cfg['key'] == 'elastic' and 'elasticity_by_cat' in result_now:
                 st.subheader('Elasticidad por categoría')
                 ec = result_now['elasticity_by_cat']
@@ -752,7 +758,7 @@ with phases[4]:
                 cm = result_ev['confusion_matrix']
                 labels = [str(c) for c in sorted(result_ev['y_test'].unique())]
                 st.plotly_chart(P.plot_confusion_matrix(cm, labels),
-                                use_container_width=True)
+                                use_container_width=True, key='eval_confusion_matrix')
                 with st.expander('¿Cómo interpretar la matriz?'):
                     st.markdown('''
 - **VP (verde)** — Verdaderos Positivos: detectados correctamente
@@ -765,7 +771,7 @@ with phases[4]:
                 st.plotly_chart(P.plot_roc_curve(
                     result_ev['roc']['fpr'],
                     result_ev['roc']['tpr'],
-                    mets['auc_roc']), use_container_width=True)
+                    mets['auc_roc']), use_container_width=True, key='eval_roc_curve')
 
         # ── Regression evaluation ──
         elif 'r2' in mets and 'mape' in mets:
@@ -785,13 +791,13 @@ with phases[4]:
                 st.subheader('Predicho vs Real')
                 st.plotly_chart(P.plot_actual_vs_predicted(
                     result_ev['y_test'], result_ev['y_pred'],
-                    cfg['target']), use_container_width=True)
+                    cfg['target']), use_container_width=True, key='eval_actual_vs_pred')
             with col_res_dist:
                 st.subheader('Distribución de residuos')
                 residuals = np.array(result_ev['y_test']) - np.array(result_ev['y_pred'])
                 fig_res = P.plot_histograms(
                     pd.DataFrame({'residuos': residuals}), ['residuos'])
-                st.plotly_chart(fig_res, use_container_width=True)
+                st.plotly_chart(fig_res, use_container_width=True, key='eval_residuals')
 
         # ── Elasticity evaluation ──
         elif 'elasticity' in mets:
@@ -809,7 +815,7 @@ with phases[4]:
                 result_ev['df_log'],
                 result_ev['elasticity'],
                 cat_col='categoria' if 'categoria' in result_ev['df_log'].columns else None),
-                use_container_width=True)
+                use_container_width=True, key='eval_elasticity_curve')
 
             if result_ev['elasticity_by_cat']:
                 st.subheader('Elasticidad por categoría')
@@ -838,7 +844,7 @@ with phases[4]:
 
                 fig_lift = P.plot_basket_lift(rules_df)
                 if fig_lift:
-                    st.plotly_chart(fig_lift, use_container_width=True)
+                    st.plotly_chart(fig_lift, use_container_width=True, key='eval_basket_lift')
 
         # ── NBO evaluation ──
         elif 'f1_macro' in mets:
@@ -854,7 +860,7 @@ with phases[4]:
             st.subheader('Probabilidad media por producto (test set)')
             probs_mean = result_ev['y_prob'].mean(axis=0)
             st.plotly_chart(P.plot_nbo_probs(result_ev['classes'], probs_mean),
-                            use_container_width=True)
+                            use_container_width=True, key='eval_nbo_probs')
 
         # ── Pass/Fail summary ──
         st.markdown('---')
