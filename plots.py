@@ -401,6 +401,81 @@ def plot_uplift_distribution(df_scored):
     )
     return fig
 
+def plot_timeseries(df, date_col, value_col):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df[date_col], y=df[value_col], mode='lines',
+        line=dict(color=PALETTE['blue'], width=1.5),
+        name=value_col))
+    fig.update_layout(
+        title=f'Serie de tiempo: {value_col}',
+        height=360, margin=dict(t=40,b=20,l=20,r=20),
+        plot_bgcolor='white', paper_bgcolor='white',
+        font_family='DM Sans')
+    fig.update_xaxes(gridcolor='#f0f0f0', title='Fecha')
+    fig.update_yaxes(gridcolor='#f0f0f0', title=value_col)
+    return fig
+
+def plot_forecast(data, forecast, test=None):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=forecast['ds'], y=forecast['yhat_upper'], mode='lines',
+        line=dict(width=0), showlegend=False, hoverinfo='skip'))
+    fig.add_trace(go.Scatter(
+        x=forecast['ds'], y=forecast['yhat_lower'], mode='lines',
+        line=dict(width=0), fill='tonexty',
+        fillcolor='rgba(26,76,140,0.15)',
+        name='Intervalo 95%', hoverinfo='skip'))
+    fig.add_trace(go.Scatter(
+        x=data['ds'], y=data['y'], mode='markers',
+        marker=dict(color=PALETTE['gray'], size=4, opacity=0.6),
+        name='Real'))
+    fig.add_trace(go.Scatter(
+        x=forecast['ds'], y=forecast['yhat'], mode='lines',
+        line=dict(color=PALETTE['blue'], width=2),
+        name='Forecast'))
+    if test is not None and len(test):
+        fig.add_vline(x=test['ds'].iloc[0], line_dash='dash',
+                      line_color=PALETTE['red'])
+    fig.update_layout(
+        title='Forecast vs Real',
+        height=420, margin=dict(t=40,b=20,l=20,r=20),
+        plot_bgcolor='white', paper_bgcolor='white',
+        font_family='DM Sans',
+        legend=dict(orientation='h', y=1.12))
+    fig.update_xaxes(gridcolor='#f0f0f0', title='Fecha')
+    fig.update_yaxes(gridcolor='#f0f0f0', title='Ventas')
+    return fig
+
+def plot_forecast_components(forecast):
+    comps = []
+    if 'trend' in forecast.columns:
+        comps.append(('Tendencia', forecast['ds'], forecast['trend']))
+    if 'weekly' in forecast.columns:
+        wk = forecast[['ds', 'weekly']].copy()
+        wk['dow'] = wk['ds'].dt.dayofweek
+        wk = wk.drop_duplicates('dow').sort_values('dow')
+        comps.append(('Estacionalidad semanal', wk['ds'].dt.strftime('%A'), wk['weekly']))
+    if 'yearly' in forecast.columns:
+        yr = forecast[['ds', 'yearly']].copy()
+        yr['doy'] = yr['ds'].dt.dayofyear
+        yr = yr.drop_duplicates('doy').sort_values('doy')
+        comps.append(('Estacionalidad anual', yr['ds'], yr['yearly']))
+
+    fig = make_subplots(rows=len(comps), cols=1,
+                        subplot_titles=[c[0] for c in comps])
+    for i, (title, x, y) in enumerate(comps):
+        fig.add_trace(go.Scatter(x=x, y=y, mode='lines',
+                                 line=dict(color=SEQ[i % len(SEQ)], width=2)),
+                      row=i+1, col=1)
+    fig.update_layout(height=260*len(comps), showlegend=False,
+                      margin=dict(t=40,b=20,l=20,r=20),
+                      plot_bgcolor='white', paper_bgcolor='white',
+                      font_family='DM Sans')
+    fig.update_xaxes(gridcolor='#f0f0f0')
+    fig.update_yaxes(gridcolor='#f0f0f0')
+    return fig
+
 def plot_nbo_probs(classes, probs_mean):
     df = pd.DataFrame({'producto': classes, 'prob': probs_mean})
     df = df.sort_values('prob', ascending=True)

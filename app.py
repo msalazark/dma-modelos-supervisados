@@ -237,6 +237,20 @@ MODEL_CONFIG = {
             'algo': 'Random Forest (n=200, max_depth=6, class_weight=balanced)',
         }
     },
+    'Forecast de Demanda (Prophet)': {
+        'key': 'prophet', 'data_key': 'forecast',
+        'badge': '📈 Forecasting',
+        'colab': None,
+        'runner': M.run_prophet, 'target': 'ventas',
+        'features': ['fecha'],
+        'criteria': {'mape': 15},
+        'business': {
+            'problem': '⚠️ Crisol planifica el stock de su tienda online a partir del promedio de la semana anterior. Esto provoca **quiebres de stock en picos de demanda** (campaña escolar, Día del Libro) y **sobre-stock en temporada baja**.',
+            'objective': 'Pronosticar la demanda diaria de ventas a 30 días, capturando tendencia y estacionalidad semanal/anual, para planificar compras e inventario.',
+            'kpis': ['MAPE < 15% en el horizonte de forecast', 'Reducir quiebres de stock -30%', 'Reducir sobre-stock en temporada baja -20%'],
+            'algo': 'Prophet (Meta) · Modelo aditivo: tendencia con changepoints + estacionalidad semanal + anual',
+        }
+    },
     # ── NO SUPERVISADOS ─────────────────────────────────────────────
     'Segmentación RFM (K-Means)': {
         'key': 'rfm_kmeans', 'data_key': 'rfm',
@@ -352,25 +366,40 @@ with st.sidebar:
     st.markdown('---')
     st.markdown('<div style="font-size:11px;color:#555;font-family:monospace;margin-bottom:.5rem">DATOS</div>', unsafe_allow_html=True)
 
+    if 'uploader_versions' not in st.session_state:
+        st.session_state.uploader_versions = {}
+
+    cfg_up = MODEL_CONFIG[model_name]
+    data_key_up = cfg_up['data_key']
+    uploader_version = st.session_state.uploader_versions.get(data_key_up, 0)
+
     uploaded = st.file_uploader('Cargar CSV propio', type='csv',
-                                help='Reemplaza los datos del modelo activo')
+                                help='Reemplaza los datos del modelo activo',
+                                key=f'uploader_{data_key_up}_{uploader_version}')
     if uploaded:
         df_up = pd.read_csv(uploaded)
-        cfg_up = MODEL_CONFIG[model_name]
-        st.session_state.dataframes[cfg_up['data_key']] = df_up
+        st.session_state.dataframes[data_key_up] = df_up
         if model_name in st.session_state.results:
             del st.session_state.results[model_name]
         st.success(f'{len(df_up)} filas cargadas ✓')
 
-    if st.button('↺ Resetear datos y resultados'):
+    if st.button('↺ Restaurar dataset de ejemplo'):
+        st.session_state.dataframes.pop(data_key_up, None)
+        st.session_state.results.pop(model_name, None)
+        st.session_state.uploader_versions[data_key_up] = uploader_version + 1
+        st.rerun()
+
+    if st.button('↺ Resetear todo (todos los modelos)'):
         st.session_state.results = {}
         st.session_state.dataframes = {}
+        st.session_state.uploader_versions = {}
         st.rerun()
 
     st.markdown('---')
     cfg_cur = MODEL_CONFIG[model_name]
     st.markdown(f'<div style="font-size:11px;color:#555;margin-bottom:4px">{cfg_cur["badge"]}</div>', unsafe_allow_html=True)
-    st.markdown(f'[↗ Abrir en Google Colab]({cfg_cur["colab"]})')
+    if cfg_cur.get('colab'):
+        st.markdown(f'[↗ Abrir en Google Colab]({cfg_cur["colab"]})')
 
 # ── MAIN ────────────────────────────────────────────────────────────
 cfg = MODEL_CONFIG[model_name]
@@ -465,34 +494,40 @@ with phases[1]:
     # Target distribution
     if cfg['target'] and cfg['target'] in df.columns:
         st.markdown('---')
-        c_td, c_cb = st.columns(2)
-        with c_td:
-            st.subheader(f'Distribución del target: `{cfg["target"]}`')
-            st.plotly_chart(P.plot_target_dist(df[cfg['target']], cfg['target']),
-                            width="stretch", key='eda_target_dist')
-        with c_cb:
-            st.subheader('Correlación con el target')
-            num_feats = [f for f in cfg['features'] if f in df.columns
-                         and pd.api.types.is_numeric_dtype(df[f])]
-            target_is_numeric = (cfg['target'] is not None
-                                  and pd.api.types.is_numeric_dtype(df[cfg['target']]))
-            if num_feats and target_is_numeric:
-                st.plotly_chart(P.plot_correlation_bar(df, num_feats, cfg['target']),
-                                width="stretch", key='eda_corr_bar')
-            elif num_feats:
-                st.info('El target es categórico — correlación de Pearson no aplica.')
+        if cfg['key'] == 'prophet':
+            st.subheader('Serie de tiempo histórica')
+            date_col = 'fecha' if 'fecha' in df.columns else df.columns[0]
+            st.plotly_chart(P.plot_timeseries(df, date_col, cfg['target']),
+                            width="stretch", key='eda_timeseries')
+        else:
+            c_td, c_cb = st.columns(2)
+            with c_td:
+                st.subheader(f'Distribución del target: `{cfg["target"]}`')
+                st.plotly_chart(P.plot_target_dist(df[cfg['target']], cfg['target']),
+                                width="stretch", key='eda_target_dist')
+            with c_cb:
+                st.subheader('Correlación con el target')
+                num_feats = [f for f in cfg['features'] if f in df.columns
+                             and pd.api.types.is_numeric_dtype(df[f])]
+                target_is_numeric = (cfg['target'] is not None
+                                      and pd.api.types.is_numeric_dtype(df[cfg['target']]))
+                if num_feats and target_is_numeric:
+                    st.plotly_chart(P.plot_correlation_bar(df, num_feats, cfg['target']),
+                                    width="stretch", key='eda_corr_bar')
+                elif num_feats:
+                    st.info('El target es categórico — correlación de Pearson no aplica.')
 
     # Histograms
-    st.markdown('---')
-    st.subheader('Distribución de variables numéricas')
     num_feats_plot = [f for f in cfg['features']
                       if f in df.columns and pd.api.types.is_numeric_dtype(df[f])]
     if num_feats_plot:
+        st.markdown('---')
+        st.subheader('Distribución de variables numéricas')
         st.plotly_chart(P.plot_histograms(df, num_feats_plot),
                         width="stretch", key='eda_histograms')
 
     # Boxplots by target for classification
-    if cfg['target'] and cfg['target'] in df.columns and model_name != 'LTV · Regresión Lineal':
+    if cfg['target'] and cfg['target'] in df.columns and model_name != 'LTV · Regresión Lineal' and cfg['key'] != 'prophet':
         st.markdown('---')
         st.subheader('Variables por clase del target')
         figs_box = P.plot_boxplots_by_target(df, num_feats_plot, cfg['target'])
@@ -544,18 +579,32 @@ with phases[2]:
         st.dataframe(clean_df, width="stretch", hide_index=True)
 
     with col2:
-        st.subheader('División Train / Test (80/20)')
-        n_total = len(df)
-        n_train = int(n_total * 0.8)
-        n_test = n_total - n_train
-        st.metric('Total registros', n_total)
-        c_tr, c_te = st.columns(2)
-        c_tr.metric('Train (80%)', n_train)
-        c_te.metric('Test (20%)', n_test)
-        st.markdown('''
-        <div class="criteria-box">
-        División <b>estratificada</b> por la variable target para mantener la misma proporción de clases en train y test.
-        </div>''', unsafe_allow_html=True)
+        if cfg['key'] == 'prophet':
+            st.subheader('División Train / Test (cronológica)')
+            n_total = len(df)
+            n_test_default = 30
+            st.metric('Total de días', n_total)
+            c_tr, c_te = st.columns(2)
+            c_tr.metric('Train', n_total - n_test_default)
+            c_te.metric('Test (horizonte)', n_test_default)
+            st.markdown('''
+            <div class="criteria-box">
+            División <b>cronológica</b>: los últimos N días se separan como horizonte de test.
+            A diferencia de los modelos tabulares, <b>nunca</b> se mezcla el orden temporal (no random split).
+            </div>''', unsafe_allow_html=True)
+        else:
+            st.subheader('División Train / Test (80/20)')
+            n_total = len(df)
+            n_train = int(n_total * 0.8)
+            n_test = n_total - n_train
+            st.metric('Total registros', n_total)
+            c_tr, c_te = st.columns(2)
+            c_tr.metric('Train (80%)', n_train)
+            c_te.metric('Test (20%)', n_test)
+            st.markdown('''
+            <div class="criteria-box">
+            División <b>estratificada</b> por la variable target para mantener la misma proporción de clases en train y test.
+            </div>''', unsafe_allow_html=True)
 
     st.markdown('---')
     st.subheader('Transformaciones por variable')
@@ -598,6 +647,8 @@ with phases[2]:
         'dispositivo': ('Sin cambio (categórica)', 'K-Modes — sin encoding'),
         'n_categorias': ('StandardScaler', 'Normalizar para clustering jerárquico'),
         'meses_cliente': ('StandardScaler', 'Normalizar — rango amplio (1-60)'),
+        'fecha': ('Conversión a datetime + renombrado a "ds"', 'Prophet requiere una columna "ds" en formato datetime'),
+        'ventas': ('Renombrado a "y"', 'Convención de Prophet para la variable a pronosticar'),
     }
     trans_rows = []
     for feat in cfg['features']:
@@ -651,6 +702,11 @@ with phases[2]:
         'Win / Loss de Oportunidades': [
             ('ratio_reuniones_ciclo', 'n_reuniones / dias_ciclo', 'Velocidad de avance — deals rápidos ganan más'),
             ('flag_competencia_alta', 'int(n_competidores >= 3)', 'Escenario de alta competencia — señal negativa'),
+        ],
+        'Forecast de Demanda (Prophet)': [
+            ('trend', 'Tendencia lineal por tramos (changepoints automáticos)', 'Captura el crecimiento/declive estructural de las ventas'),
+            ('weekly_seasonality', 'Términos de Fourier (orden 3) sobre día de semana', 'Captura el patrón semanal — ej. picos de fin de semana'),
+            ('yearly_seasonality', 'Términos de Fourier (orden 10) sobre día del año', 'Captura estacionalidad anual — campañas y temporadas'),
         ],
         'Uplift · Incrementalidad': [
             ('rfm_score', 'n_compras_prev × (1/recencia_dias) × ticket_prom_k', 'Score RFM simplificado — predice base de conversión'),
@@ -721,6 +777,13 @@ with phases[3]:
             min_sup = st.slider('min_support', 0.02, 0.30, 0.05, 0.01)
             min_conf = st.slider('min_confidence', 0.20, 0.90, 0.35, 0.05)
             min_lift = st.slider('min_lift', 1.0, 5.0, 1.0, 0.1)
+        elif cfg['key'] == 'prophet':
+            horizon = st.slider('Horizonte de test (días)', 14, 60, 30, 7)
+            cp_scale = st.slider('changepoint_prior_scale', 0.01, 0.50, 0.05, 0.01)
+            seas_mode = st.selectbox('Modo de estacionalidad', ['additive', 'multiplicative'])
+            yearly_on = st.checkbox('Estacionalidad anual', value=True)
+            weekly_on = st.checkbox('Estacionalidad semanal', value=True)
+            st.info('Prophet detecta automáticamente *changepoints* en la tendencia y combina componentes de estacionalidad.')
 
         train_btn = st.button('▶ Entrenar modelo', type='primary',
                               width="stretch")
@@ -751,6 +814,17 @@ with phases[3]:
             k    = n_clusters_hc    if 'n_clusters_hc'    in dir() else 4
             link = linkage_method   if 'linkage_method'   in dir() else 'ward'
             result = M.run_hierarchical(df, n_clusters=k, linkage=link)
+            st.session_state.results[model_name] = result
+        elif cfg['key'] == 'prophet':
+            h  = horizon   if 'horizon'   in dir() else 30
+            cp = cp_scale  if 'cp_scale'  in dir() else 0.05
+            sm = seas_mode if 'seas_mode' in dir() else 'additive'
+            yo = yearly_on if 'yearly_on' in dir() else True
+            wo = weekly_on if 'weekly_on' in dir() else True
+            with st.spinner('Entrenando Prophet...'):
+                result = M.run_prophet(df, test_days=h, changepoint_prior_scale=cp,
+                                       seasonality_mode=sm, yearly_seasonality=yo,
+                                       weekly_seasonality=wo)
             st.session_state.results[model_name] = result
         else:
             result = get_results(model_name)
@@ -804,6 +878,12 @@ with phases[3]:
                 m1.metric('Clusters', mets['n_clusters'])
                 m2.metric('Silhouette', f'{mets["silhouette"]:.3f}')
                 m3.metric('Coef. Cofenético', f'{mets["cophenetic"]:.3f}')
+            elif 'horizon' in mets:
+                m1,m2,m3,m4 = st.columns(4)
+                m1.metric('Horizonte (días)', mets['horizon'])
+                m2.metric('MAE', f'{mets["mae"]:,.1f}')
+                m3.metric('RMSE', f'{mets["rmse"]:,.1f}')
+                m4.metric('MAPE', f'{mets["mape"]:.1f}%')
 
     # Feature Importance / Coefficients
     st.markdown('---')
@@ -825,6 +905,10 @@ with phases[3]:
                 for cat, val in sorted(ec.items(), key=lambda x: x[1]):
                     tipo = '🔴 Elástico' if abs(val)>1 else '🟡 Inelástico'
                     st.metric(cat, f'β = {val:.3f}', delta=tipo, delta_color='off')
+            elif cfg['key'] == 'prophet':
+                st.subheader('Forecast vs Real (train + test)')
+                st.plotly_chart(P.plot_forecast(result_now['data'], result_now['forecast'], result_now['test']),
+                                width="stretch", key='mod_prophet_forecast')
 
         with col_fi:
             if cfg['key'] in ('rfm_kmeans', 'hierarchical') and result_now and 'cluster_profiles' in result_now:
@@ -1037,6 +1121,24 @@ with phases[3]:
                 st.metric('Perfil asignado', f'Perfil {cluster_id + 1}')
                 st.dataframe(result_now['cluster_modes'].iloc[[cluster_id]],
                              width="stretch", hide_index=True)
+
+            elif cfg['key'] == 'prophet' and result_now.get('model'):
+                dias_futuro = st.slider('Días a futuro', 1, 90, 30)
+                last_date = result_now['data']['ds'].max()
+                target_date = last_date + pd.Timedelta(days=dias_futuro)
+                fc = result_now['forecast'].set_index('ds')
+                row = fc.loc[target_date]
+                yhat, lo, hi = row['yhat'], row['yhat_lower'], row['yhat_upper']
+                st.metric(f'Demanda estimada · {target_date.strftime("%Y-%m-%d")}', f'{yhat:,.0f} u.')
+                st.caption(f'Intervalo de confianza 95%: [{lo:,.0f}, {hi:,.0f}] u.')
+                avg_hist = result_now['data']['y'].mean()
+                delta_pct = (yhat - avg_hist) / avg_hist * 100
+                if delta_pct >= 15:
+                    st.markdown(f'<div class="prob-high">📈 <b>Demanda alta</b> · {delta_pct:+.0f}% vs promedio histórico. Reforzar stock para evitar quiebres.</div>', unsafe_allow_html=True)
+                elif delta_pct <= -15:
+                    st.markdown(f'<div class="prob-low">📉 <b>Demanda baja</b> · {delta_pct:+.0f}% vs promedio histórico. Evitar sobre-stock.</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="prob-med">➡️ <b>Demanda normal</b> · {delta_pct:+.0f}% vs promedio histórico.</div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════
 # FASE 5: EVALUATION
@@ -1326,6 +1428,35 @@ with phases[4]:
             st.plotly_chart(P.plot_nbo_probs(result_ev['classes'], probs_mean),
                             width="stretch", key='eval_nbo_probs')
 
+        # ── Prophet forecast evaluation ──
+        elif 'horizon' in mets:
+            st.subheader('Métricas en el horizonte de test')
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric('Horizonte (días)', mets['horizon'])
+            c2.metric('MAE', f'{mets["mae"]:,.1f} u.')
+            c3.metric('RMSE', f'{mets["rmse"]:,.1f} u.')
+            c4.metric('MAPE', f'{mets["mape"]:.1f}%',
+                       delta='✓ aprobado' if mets['mape'] <= crit.get('mape',100) else '✗ insuficiente',
+                       delta_color='normal' if mets['mape'] <= crit.get('mape',100) else 'inverse')
+
+            st.markdown('---')
+            st.subheader('Forecast vs Real')
+            st.plotly_chart(P.plot_forecast(result_ev['data'], result_ev['forecast'], result_ev['test']),
+                            width="stretch", key='eval_prophet_forecast')
+
+            st.markdown('---')
+            st.subheader('Componentes del modelo')
+            st.plotly_chart(P.plot_forecast_components(result_ev['forecast']),
+                            width="stretch", key='eval_prophet_components')
+
+            with st.expander('¿Cómo interpretar los componentes?'):
+                st.markdown('''
+- **Tendencia**: evolución estructural de las ventas en el largo plazo, con *changepoints* automáticos donde la pendiente cambia.
+- **Estacionalidad semanal**: patrón que se repite cada 7 días (ej. picos de fin de semana).
+- **Estacionalidad anual**: patrón que se repite cada año (ej. campaña escolar en marzo, Navidad en diciembre).
+- El **forecast final** es la suma (modo aditivo) o producto (modo multiplicativo) de estos componentes.
+                ''')
+
         # ── Pass/Fail summary ──
         st.markdown('---')
         st.subheader('Validación vs criterios de negocio')
@@ -1430,6 +1561,12 @@ with phases[5]:
             'output': 'Segmentos jerárquicos → Informe ejecutivo + Dashboard estratégico',
             'roi': [('Precisión de segmentación','+35% vs RFM simple'), ('Ahorro presupuesto campañas','-25%'), ('ROI modelo','4x–8x')],
         },
+        'Forecast de Demanda (Prophet)': {
+            'infra': 'Cloud Run (job programado) + BigQuery + Looker Studio',
+            'freq': 'Diario (re-entrenamiento nocturno con datos del día)',
+            'output': 'Forecast a 30 días (yhat + intervalo 95%) → Dashboard de planificación de inventario',
+            'roi': [('Reducción quiebres de stock','-30%'), ('Reducción sobre-stock','-20%'), ('ROI modelo','5x–10x')],
+        },
     }
 
     dep = DEPLOY_INFO.get(model_name, {})
@@ -1461,11 +1598,12 @@ with phases[5]:
         for i, s in enumerate(steps, 1):
             st.markdown(f'{i}. {s}')
 
-    st.markdown('---')
-    st.subheader('Notebook completo en Google Colab')
-    st.markdown(f'Abre el notebook para ver el código Python completo con el modelo real, visualizaciones adicionales y experimenta con tus propios datos.')
-    st.link_button(f'↗ Abrir en Google Colab — {model_name}',
-                    cfg['colab'], width="content")
+    if cfg.get('colab'):
+        st.markdown('---')
+        st.subheader('Notebook completo en Google Colab')
+        st.markdown(f'Abre el notebook para ver el código Python completo con el modelo real, visualizaciones adicionales y experimenta con tus propios datos.')
+        st.link_button(f'↗ Abrir en Google Colab — {model_name}',
+                        cfg['colab'], width="content")
 
     # Export model results
     result_exp = st.session_state.results.get(model_name)
@@ -1519,4 +1657,17 @@ with phases[5]:
             '⬇ Descargar predicciones completas (CSV)',
             data=csv_pred,
             file_name=f'{cfg["data_key"]}_predicciones.csv',
+            mime='text/csv')
+
+    # Export para Prophet (forecast)
+    if result_exp and cfg['key'] == 'prophet' and 'forecast' in result_exp:
+        st.markdown('---')
+        st.subheader('Exportar forecast')
+        df_forecast_exp = result_exp['forecast'][['ds','yhat','yhat_lower','yhat_upper']].rename(
+            columns={'ds':'fecha','yhat':'prediccion','yhat_lower':'limite_inferior','yhat_upper':'limite_superior'})
+        csv_forecast = df_forecast_exp.to_csv(index=False).encode()
+        st.download_button(
+            '⬇ Descargar forecast completo (CSV)',
+            data=csv_forecast,
+            file_name=f'{cfg["data_key"]}_forecast.csv',
             mime='text/csv')

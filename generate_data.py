@@ -294,6 +294,28 @@ def gen_hierarchical():
     df_h.insert(0, 'cliente_id', range(1, len(df_h)+1))
     return df_h.sample(frac=1, random_state=42).reset_index(drop=True)
 
+def gen_forecast_ventas():
+    """Serie de tiempo diaria de ventas (e-commerce Crisol) para forecasting con Prophet."""
+    n_days = 730
+    dates = pd.date_range('2023-01-01', periods=n_days, freq='D')
+
+    t = np.arange(n_days)
+    trend = 800 + 0.6 * t
+
+    dayofweek = dates.dayofweek.to_numpy()
+    dayofyear = dates.dayofyear.to_numpy()
+
+    is_weekend = np.isin(dayofweek, [5, 6]).astype(float)
+    weekly = 50 * np.sin(2 * np.pi * dayofweek / 7) + 90 * is_weekend
+
+    # Pico ~marzo (temporada escolar) y diciembre (campaña navideña)
+    yearly = 180 * np.sin(2 * np.pi * (dayofyear - 60) / 365.25)
+
+    noise = np.random.normal(0, 45, n_days)
+
+    ventas = np.round(trend + weekly + yearly + noise).clip(min=100).astype(int)
+    return pd.DataFrame({'fecha': dates, 'ventas': ventas})
+
 DATASETS = {
     'churn': gen_churn,
     'ltv': gen_ltv,
@@ -307,6 +329,7 @@ DATASETS = {
     'rfm': gen_rfm,
     'kmodes': gen_kmodes_data,
     'hierarchical': gen_hierarchical,
+    'forecast': gen_forecast_ventas,
 }
 
 if __name__ == '__main__':

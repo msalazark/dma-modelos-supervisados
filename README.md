@@ -12,6 +12,7 @@ Herramienta educativa interactiva que ejecuta **6 modelos ML reales** siguiendo 
 | Elasticidad de Precio | Regresión | Log-log OLS |
 | Market Basket Analysis | Asociación | Apriori (mlxtend) |
 | Next Best Offer | Clasificación multiclase | Random Forest |
+| Forecast de Demanda | Series de tiempo | Prophet (Meta) |
 
 ## Fases CRISP-DM por modelo
 
@@ -65,6 +66,7 @@ Todas las fases se recalculan automáticamente con tus datos.
 | Elasticidad | `precio, unidades, categoria` |
 | Market Basket | `ticket_id, producto` |
 | Next Best Offer | `tiene_tarjeta, tiene_cuenta, antiguedad_m, saldo_k, producto_adquirido` |
+| Forecast de Demanda | `fecha, ventas` |
 
 ## Notebooks Google Colab
 

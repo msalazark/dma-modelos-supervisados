@@ -549,6 +549,68 @@ def run_kmodes(df: pd.DataFrame, n_clusters: int = 3) -> dict:
         'train_size': len(df), 'test_size': 0,
     }
 
+# ── FORECAST DE DEMANDA (PROPHET) ──────────────────────────────────
+def run_prophet(df: pd.DataFrame, test_days: int = 30,
+                changepoint_prior_scale: float = 0.05,
+                seasonality_mode: str = 'additive',
+                yearly_seasonality: bool = True,
+                weekly_seasonality: bool = True,
+                sim_days: int = 90) -> dict:
+    try:
+        from prophet import Prophet
+        import logging
+        logging.getLogger('prophet').setLevel(logging.WARNING)
+        logging.getLogger('cmdstanpy').setLevel(logging.WARNING)
+    except ImportError:
+        return {'error': 'Instala el paquete: pip install prophet'}
+
+    date_col = 'fecha' if 'fecha' in df.columns else df.columns[0]
+    value_col = 'ventas' if 'ventas' in df.columns else df.columns[1]
+
+    data = df[[date_col, value_col]].dropna().copy()
+    data.columns = ['ds', 'y']
+    data['ds'] = pd.to_datetime(data['ds'])
+    data = data.sort_values('ds').reset_index(drop=True)
+
+    n_test = max(7, min(test_days, len(data) // 4))
+    train = data.iloc[:-n_test]
+    test = data.iloc[-n_test:]
+
+    model = Prophet(
+        changepoint_prior_scale=changepoint_prior_scale,
+        seasonality_mode=seasonality_mode,
+        yearly_seasonality=yearly_seasonality,
+        weekly_seasonality=weekly_seasonality,
+    )
+    model.fit(train)
+
+    future = model.make_future_dataframe(periods=n_test + sim_days)
+    forecast = model.predict(future)
+
+    fc_test = forecast.set_index('ds').loc[test['ds']]
+    y_true = test['y'].values
+    y_pred = fc_test['yhat'].values
+
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mape = float(np.mean(np.abs((y_true - y_pred) / (y_true + 1e-9))) * 100)
+
+    return {
+        'model': model,
+        'data': data,
+        'train': train,
+        'test': test,
+        'forecast': forecast,
+        'metrics': {
+            'mae': round(float(mae), 2),
+            'rmse': round(float(rmse), 2),
+            'mape': round(mape, 2),
+            'horizon': n_test,
+        },
+        'train_size': len(train),
+        'test_size': len(test),
+    }
+
 # ── CLUSTERING JERÁRQUICO ──────────────────────────────────────────
 def run_hierarchical(df: pd.DataFrame, n_clusters: int = 4,
                      linkage: str = 'ward') -> dict:
