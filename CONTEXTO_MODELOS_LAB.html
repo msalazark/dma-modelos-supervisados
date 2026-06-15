@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Contexto de casos para los modelos del CRISP-DM Lab</title>
+            <style>
+/* From extension vscode.github */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.vscode-dark img[src$=\#gh-light-mode-only],
+.vscode-light img[src$=\#gh-dark-mode-only],
+.vscode-high-contrast:not(.vscode-high-contrast-light) img[src$=\#gh-light-mode-only],
+.vscode-high-contrast-light img[src$=\#gh-dark-mode-only] {
+	display: none;
+}
+
+/* From extension bierner.markdown-checkbox */
+.contains-task-list {
+    padding-left: 0;
+}
+
+.contains-task-list li {
+    margin-left: 24px;
+}
+
+.contains-task-list .task-list-item {
+    list-style: none;
+    padding-left: 0;
+    margin-left: 0;
+}
+
+.contains-task-list .contains-task-list {
+    padding-left: 20px;
+} 
+</style>
+            
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/markdown.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/highlight.css">
+<style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans', sans-serif;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+        </style>
+        <style>
+.task-list-item {
+    list-style-type: none;
+}
+
+.task-list-item-checkbox {
+    margin-left: -20px;
+    vertical-align: middle;
+    pointer-events: none;
+}
+</style>
+<style>
+:root {
+  --color-note: #0969da;
+  --color-tip: #1a7f37;
+  --color-warning: #9a6700;
+  --color-severe: #bc4c00;
+  --color-caution: #d1242f;
+  --color-important: #8250df;
+}
+
+</style>
+<style>
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-note: #2f81f7;
+    --color-tip: #3fb950;
+    --color-warning: #d29922;
+    --color-severe: #db6d28;
+    --color-caution: #f85149;
+    --color-important: #a371f7;
+  }
+}
+
+</style>
+<style>
+.markdown-alert {
+  padding: 0.5rem 1rem;
+  margin-bottom: 16px;
+  color: inherit;
+  border-left: .25em solid #888;
+}
+
+.markdown-alert>:first-child {
+  margin-top: 0
+}
+
+.markdown-alert>:last-child {
+  margin-bottom: 0
+}
+
+.markdown-alert .markdown-alert-title {
+  display: flex;
+  font-weight: 500;
+  align-items: center;
+  line-height: 1
+}
+
+.markdown-alert .markdown-alert-title .octicon {
+  margin-right: 0.5rem;
+  display: inline-block;
+  overflow: visible !important;
+  vertical-align: text-bottom;
+  fill: currentColor;
+}
+
+.markdown-alert.markdown-alert-note {
+  border-left-color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-note .markdown-alert-title {
+  color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-important {
+  border-left-color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-important .markdown-alert-title {
+  color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-warning {
+  border-left-color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-warning .markdown-alert-title {
+  color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-tip {
+  border-left-color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-tip .markdown-alert-title {
+  color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-caution {
+  border-left-color: var(--color-caution);
+}
+
+.markdown-alert.markdown-alert-caution .markdown-alert-title {
+  color: var(--color-caution);
+}
+
+</style>
+        
+        </head>
+        <body class="vscode-body vscode-light">
+            <span id="markdown-mermaid" aria-hidden="true" data-config="{&quot;darkModeTheme&quot;:&quot;vscode&quot;,&quot;lightModeTheme&quot;:&quot;vscode&quot;,&quot;maxTextSize&quot;:50000,&quot;clickDrag&quot;:&quot;alt&quot;,&quot;showControls&quot;:&quot;onHoverOrFocus&quot;,&quot;resizable&quot;:true,&quot;maxHeight&quot;:&quot;&quot;}"></span>
+				<h1 id="contexto-de-casos-para-los-modelos-del-crisp-dm-lab">Contexto de casos para los modelos del CRISP-DM Lab</h1>
+<p>Este documento agrega contexto de negocio y de datos para cada modelo definido en <code>models.py</code> del lab <code>dma-modelos-supervisados</code>. La idea es que el estudiante no vea cada modelo como un ejercicio aislado de codigo, sino como una situacion realista de Marketing Analytics donde la data representa clientes, leads, ventas, oportunidades o transacciones.</p>
+<p>Cada caso sigue una logica CRISP-DM: problema de negocio, data disponible, variable objetivo o criterio de agrupacion, uso del modelo e interpretacion esperada.</p>
+<h2 id="1-churn-prediction">1. Churn Prediction</h2>
+<p><strong>Caso:</strong> Un banco quiere anticipar que clientes tienen mayor probabilidad de abandonar sus productos durante los proximos 30 dias.</p>
+<p><strong>Data usada:</strong> La tabla simula una cartera de clientes bancarios con actividad reciente, quejas, uso digital, saldo promedio y cantidad de productos contratados.</p>
+<p><strong>Variables principales:</strong> <code>dias_inactivo</code>, <code>quejas</code>, <code>logins_30d</code>, <code>saldo_prom_k</code>, <code>productos</code>.</p>
+<p><strong>Variable objetivo:</strong> <code>churn</code>, donde 1 indica cliente fugado o en alto riesgo de fuga y 0 indica cliente retenido.</p>
+<p><strong>Modelo:</strong> Random Forest Classifier.</p>
+<p><strong>Uso analitico:</strong> Priorizar acciones de retencion sobre clientes con mayor riesgo, especialmente cuando el costo de perder un cliente es mayor que el costo de contactarlo.</p>
+<p><strong>Interpretacion:</strong> Un mayor numero de dias inactivo y mas quejas deberian elevar el riesgo. Mas logins, mayor saldo y mas productos suelen indicar mayor vinculacion y menor churn.</p>
+<h2 id="2-lead-scoring-con-regresion-logistica">2. Lead Scoring con Regresion Logistica</h2>
+<p><strong>Caso:</strong> Una universidad o institucion educativa recibe muchos leads, pero el equipo comercial no puede llamar con la misma intensidad a todos.</p>
+<p><strong>Data usada:</strong> La tabla representa leads capturados por formularios o campanas digitales, con senales de interes como interacciones web, clicks en precios y tiempo navegando.</p>
+<p><strong>Variables principales:</strong> <code>dias_contacto</code>, <code>interacciones_web</code>, <code>clicks_precio</code>, <code>tiempo_pag_min</code>.</p>
+<p><strong>Variable objetivo:</strong> <code>convirtio</code>, donde 1 indica que el lead se matriculo o avanzo a conversion y 0 indica que no convirtio.</p>
+<p><strong>Modelo:</strong> Regresion Logistica.</p>
+<p><strong>Uso analitico:</strong> Ordenar leads por probabilidad de conversion y definir reglas de priorizacion comercial.</p>
+<p><strong>Interpretacion:</strong> Los coeficientes y odds ratios ayudan a explicar que senales aumentan o reducen la probabilidad de conversion.</p>
+<h2 id="3-ltv--customer-value">3. LTV / Customer Value</h2>
+<p><strong>Caso:</strong> Un retailer necesita estimar el valor anual esperado de sus clientes para decidir cuanto invertir en adquisicion, retencion o beneficios.</p>
+<p><strong>Data usada:</strong> La tabla simula clientes con historial de compras, ticket promedio, antiguedad, cantidad de categorias compradas y canal digital.</p>
+<p><strong>Variables principales:</strong> <code>compras_6m</code>, <code>ticket_prom</code>, <code>meses_cliente</code>, <code>categorias</code>, <code>canal_digital</code>.</p>
+<p><strong>Variable objetivo:</strong> <code>ltv_anual</code>.</p>
+<p><strong>Modelo:</strong> Ridge Regression.</p>
+<p><strong>Uso analitico:</strong> Estimar valor futuro del cliente y segmentar la base en clientes de bajo, medio y alto valor.</p>
+<p><strong>Interpretacion:</strong> El modelo permite discutir error de prediccion, R2, MAE, RMSE y MAPE. Tambien permite conectar LTV con decisiones de CAC maximo.</p>
+<h2 id="4-elasticidad-de-precio">4. Elasticidad de Precio</h2>
+<p><strong>Caso:</strong> Una cadena retail quiere saber si subir o bajar precios incrementa o destruye ingresos, y si las promociones realmente generan demanda adicional.</p>
+<p><strong>Data usada:</strong> La tabla simula ventas semanales por categoria, precio, unidades vendidas y presencia de promocion.</p>
+<p><strong>Variables principales:</strong> <code>precio</code>, <code>unidades</code>, <code>categoria</code>, <code>promocion</code>.</p>
+<p><strong>Variable objetivo:</strong> <code>log_unidades</code>, construida a partir de <code>unidades</code>.</p>
+<p><strong>Modelo:</strong> Regresion lineal log-log.</p>
+<p><strong>Uso analitico:</strong> Medir la sensibilidad de la demanda frente al precio. La elasticidad se interpreta con el coeficiente de <code>log_precio</code>.</p>
+<p><strong>Interpretacion:</strong> Una elasticidad negativa indica que al subir precio bajan unidades. Si el valor absoluto es mayor a 1, la demanda es elastica; si es menor a 1, es inelastica.</p>
+<h2 id="5-market-basket-analysis">5. Market Basket Analysis</h2>
+<p><strong>Caso:</strong> Una libreria quiere descubrir productos que suelen comprarse juntos para disenar bundles, recomendaciones o acciones de cross-sell.</p>
+<p><strong>Data usada:</strong> La tabla representa tickets de compra. Cada fila contiene un producto dentro de un ticket.</p>
+<p><strong>Variables principales:</strong> <code>ticket_id</code>, <code>producto</code>.</p>
+<p><strong>Variable objetivo:</strong> No aplica. Es un modelo no supervisado de reglas de asociacion.</p>
+<p><strong>Modelo:</strong> Apriori y reglas de asociacion.</p>
+<p><strong>Uso analitico:</strong> Identificar reglas del tipo &quot;si compra A, tambien suele comprar B&quot;.</p>
+<p><strong>Interpretacion:</strong> Soporte mide frecuencia, confianza mide probabilidad condicional y lift mide si la asociacion es mas fuerte que el azar.</p>
+<h2 id="6-propension-a-compra">6. Propension a Compra</h2>
+<p><strong>Caso:</strong> Una empresa con base de clientes quiere priorizar a quienes tienen mayor probabilidad de comprar en una campana proxima.</p>
+<p><strong>Data usada:</strong> La tabla simula comportamiento reciente, historial de compras, engagement, uso digital, edad y cantidad de productos.</p>
+<p><strong>Variables principales:</strong> <code>recencia_dias</code>, <code>n_compras_12m</code>, <code>engagement_score</code>, <code>canal_digital</code>, <code>edad</code>, <code>n_productos</code>.</p>
+<p><strong>Variable objetivo:</strong> <code>compro</code>.</p>
+<p><strong>Modelo:</strong> Gradient Boosting Classifier.</p>
+<p><strong>Uso analitico:</strong> Crear audiencias de alta propension para mejorar conversion y reducir gasto comercial en clientes frios.</p>
+<p><strong>Interpretacion:</strong> La importancia de variables muestra que factores explican mejor la probabilidad de compra. El ranking de scores sirve para decidir a quien contactar primero.</p>
+<h2 id="7-win--loss-de-oportunidades">7. Win / Loss de Oportunidades</h2>
+<p><strong>Caso:</strong> Un equipo B2B quiere estimar que oportunidades comerciales tienen mayor probabilidad de cierre para priorizar tiempo de ejecutivos.</p>
+<p><strong>Data usada:</strong> La tabla representa oportunidades de venta con monto, duracion del ciclo, reuniones, competidores, decisores y si la propuesta fue personalizada.</p>
+<p><strong>Variables principales:</strong> <code>monto_oportunidad_k</code>, <code>dias_ciclo</code>, <code>n_reuniones</code>, <code>n_competidores</code>, <code>decision_makers</code>, <code>propuesta_personalizada</code>.</p>
+<p><strong>Variable objetivo:</strong> <code>ganado</code>.</p>
+<p><strong>Modelo:</strong> Random Forest Classifier.</p>
+<p><strong>Uso analitico:</strong> Detectar deals con alta probabilidad de ganar, oportunidades en riesgo y factores que aumentan o reducen el win rate.</p>
+<p><strong>Interpretacion:</strong> Mas competidores y ciclos largos suelen reducir la probabilidad de cierre. Mas reuniones, decisores involucrados y propuesta personalizada suelen aumentar la probabilidad de ganar.</p>
+<h2 id="8-uplift--incrementalidad">8. Uplift / Incrementalidad</h2>
+<p><strong>Caso:</strong> Una campana de marketing no solo quiere saber quien compra, sino quien compra gracias a la campana.</p>
+<p><strong>Data usada:</strong> La tabla simula clientes tratados y de control, con conversion observada y variables de comportamiento previo.</p>
+<p><strong>Variables principales:</strong> <code>edad</code>, <code>recencia_dias</code>, <code>n_compras_prev</code>, <code>ticket_prom_k</code>, <code>canal_digital</code>, <code>tratamiento</code>.</p>
+<p><strong>Variable objetivo:</strong> <code>convirtio</code>.</p>
+<p><strong>Modelo:</strong> Two-model approach con dos regresiones logisticas: una para tratados y otra para control.</p>
+<p><strong>Uso analitico:</strong> Separar clientes persuadibles de clientes que comprarian igual sin campana, y evitar gastar presupuesto en audiencias sin impacto incremental.</p>
+<p><strong>Interpretacion:</strong> El <code>uplift_score</code> es la diferencia entre probabilidad de conversion con tratamiento y sin tratamiento. Un uplift alto indica mayor impacto incremental esperado.</p>
+<h2 id="9-next-best-offer">9. Next Best Offer</h2>
+<p><strong>Caso:</strong> Un banco quiere recomendar el siguiente producto mas relevante para cada cliente en lugar de ofrecer el mismo producto a toda la cartera.</p>
+<p><strong>Data usada:</strong> La tabla simula clientes con productos actuales, antiguedad, saldo y el producto finalmente adquirido.</p>
+<p><strong>Variables principales:</strong> <code>tiene_tarjeta</code>, <code>tiene_cuenta</code>, <code>tiene_seguro</code>, <code>tiene_prestamo</code>, <code>antiguedad_m</code>, <code>saldo_k</code>.</p>
+<p><strong>Variable objetivo:</strong> <code>producto_adquirido</code>.</p>
+<p><strong>Modelo:</strong> Random Forest multiclase.</p>
+<p><strong>Uso analitico:</strong> Recomendar el producto con mayor probabilidad de adopcion y evaluar precision top-1 y top-2.</p>
+<p><strong>Interpretacion:</strong> La exactitud top-2 es especialmente util porque en negocio puede bastar con que el producto correcto este entre las dos mejores recomendaciones.</p>
+<h2 id="10-segmentacion-rfm-con-k-means">10. Segmentacion RFM con K-Means</h2>
+<p><strong>Caso:</strong> Un retailer quiere segmentar clientes por comportamiento de compra para definir estrategias diferenciadas de retencion, reactivacion y fidelizacion.</p>
+<p><strong>Data usada:</strong> La tabla simula clientes con recencia, frecuencia y monto acumulado.</p>
+<p><strong>Variables principales:</strong> <code>recencia_dias</code>, <code>frecuencia_compras</code>, <code>monto_total_k</code>.</p>
+<p><strong>Variable objetivo:</strong> No aplica. Es clustering no supervisado.</p>
+<p><strong>Modelo:</strong> K-Means.</p>
+<p><strong>Uso analitico:</strong> Construir segmentos como champions, potenciales, en riesgo y perdidos.</p>
+<p><strong>Interpretacion:</strong> Los centroides permiten describir cada cluster. Silhouette, inertia y curva de codo ayudan a evaluar si la segmentacion es razonable.</p>
+<h2 id="11-segmentacion-categorica-con-k-modes">11. Segmentacion Categorica con K-Modes</h2>
+<p><strong>Caso:</strong> Una institucion educativa o marca digital necesita perfilar prospectos segun variables categoricas como canal, region, dispositivo y categoria preferida.</p>
+<p><strong>Data usada:</strong> La tabla simula perfiles de usuario con atributos 100% categoricos.</p>
+<p><strong>Variables principales:</strong> <code>canal_adquisicion</code>, <code>categoria_preferida</code>, <code>frecuencia_visita</code>, <code>region</code>, <code>edad_grupo</code>, <code>dispositivo</code>.</p>
+<p><strong>Variable objetivo:</strong> No aplica. Es clustering no supervisado.</p>
+<p><strong>Modelo:</strong> K-Modes.</p>
+<p><strong>Uso analitico:</strong> Descubrir perfiles accionables para personalizar comunicacion, canal y mensaje.</p>
+<p><strong>Interpretacion:</strong> A diferencia de K-Means, K-Modes trabaja con modas categoricas y distancia de Hamming. El resultado se interpreta por la categoria dominante en cada variable.</p>
+<h2 id="12-forecast-de-demanda-con-prophet">12. Forecast de Demanda con Prophet</h2>
+<p><strong>Caso:</strong> Un e-commerce quiere anticipar ventas diarias para planificar inventario, compras y acciones comerciales.</p>
+<p><strong>Data usada:</strong> La tabla simula ventas diarias durante dos anos, con tendencia, estacionalidad semanal, estacionalidad anual y ruido.</p>
+<p><strong>Variables principales:</strong> <code>fecha</code>, <code>ventas</code>.</p>
+<p><strong>Variable objetivo:</strong> <code>ventas</code>, proyectada hacia adelante.</p>
+<p><strong>Modelo:</strong> Prophet.</p>
+<p><strong>Uso analitico:</strong> Pronosticar demanda futura y evaluar error en un horizonte temporal.</p>
+<p><strong>Interpretacion:</strong> MAE, RMSE y MAPE muestran la calidad del pronostico. El split debe respetar el orden temporal; no se debe mezclar aleatoriamente train y test.</p>
+<h2 id="13-clustering-jerarquico">13. Clustering Jerarquico</h2>
+<p><strong>Caso:</strong> Un banco quiere explorar la estructura natural de segmentos de clientes sin decidir de antemano cuantos grupos existen.</p>
+<p><strong>Data usada:</strong> La tabla simula comportamiento de cliente con recencia, frecuencia, ticket promedio, categorias, antiguedad y canal digital.</p>
+<p><strong>Variables principales:</strong> <code>recencia_dias</code>, <code>frecuencia_compras</code>, <code>ticket_prom_k</code>, <code>n_categorias</code>, <code>meses_cliente</code>, <code>canal_digital</code>.</p>
+<p><strong>Variable objetivo:</strong> No aplica. Es clustering no supervisado.</p>
+<p><strong>Modelo:</strong> Agglomerative Clustering con linkage jerarquico.</p>
+<p><strong>Uso analitico:</strong> Usar el dendrograma para decidir cortes y construir una taxonomia de clientes.</p>
+<p><strong>Interpretacion:</strong> El coeficiente cofenetico ayuda a evaluar que tan bien el dendrograma preserva las distancias originales. Los perfiles promedio por cluster permiten traducir grupos tecnicos a segmentos de negocio.</p>
+<h2 id="como-usar-este-contexto-en-clase">Como usar este contexto en clase</h2>
+<ol>
+<li>Antes de entrenar el modelo, pedir al estudiante que identifique el problema de negocio y la decision que se tomaria con el output.</li>
+<li>Revisar si las columnas disponibles realmente representan senales utiles para esa decision.</li>
+<li>Entrenar el modelo y conectar metricas tecnicas con criterios de negocio.</li>
+<li>Interpretar outputs: probabilidades, coeficientes, importancia de variables, reglas, clusters o forecast.</li>
+<li>Discutir limitaciones: datos sinteticos, sesgos, costo de errores, estabilidad temporal y necesidad de validacion con datos reales.</li>
+</ol>
+<h2 id="nota-sobre-los-datos-sinteticos">Nota sobre los datos sinteticos</h2>
+<p>Los datos son generados para fines pedagogicos. Tienen relaciones intencionales entre variables para que los modelos encuentren patrones interpretables. En un caso real se deberia validar calidad de datos, definicion de target, ventana temporal, leakage, representatividad, costo de falsos positivos y falsos negativos, y criterios de aceptacion con stakeholders.</p>
+
+            
+            
+        </body>
+        </html>
