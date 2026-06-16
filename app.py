@@ -12,6 +12,9 @@ warnings.filterwarnings('ignore')
 sys.path.insert(0, os.path.dirname(__file__))
 
 from generate_data import DATASETS
+import importlib, inspect
+for _mod in ['models', 'plots']:
+    sys.modules.pop(_mod, None)
 import models as M
 import plots as P
 
@@ -259,6 +262,7 @@ MODEL_CONFIG = {
         'colab': 'https://colab.research.google.com/drive/1SoS96Sr4Cwy-BJxQ6TfOKjn4EHogk3Qc',
         'runner': M.run_kmeans, 'target': None,
         'features': ['recencia_dias','frecuencia_compras','monto_total_k'],
+        'min_features': 2,
         'criteria': {'silhouette': 0.35, 'n_clusters': 4},
         'business': {
             'problem': '⚠️ Un retailer trata a todos sus clientes igual. El 70% del presupuesto de retención se gasta en clientes que no necesitan activación o que ya están perdidos.',
@@ -274,6 +278,8 @@ MODEL_CONFIG = {
         'colab': 'https://colab.research.google.com/drive/1e36DSXM6RJ7WtWY8bAHHdcitSV9QEcSj',
         'runner': M.run_kmodes, 'target': None,
         'features': ['canal_adquisicion','categoria_preferida','frecuencia_visita','region','edad_grupo','dispositivo'],
+        'feature_dtype': 'categorical',
+        'min_features': 2,
         'criteria': {'n_clusters': 3},
         'business': {
             'problem': '⚠️ ICPNA/Tecsup no conoce los perfiles de comportamiento de sus prospectos digitales. Todos reciben el mismo mensaje sin importar canal, dispositivo ni región.',
@@ -289,6 +295,7 @@ MODEL_CONFIG = {
         'colab': 'https://colab.research.google.com/drive/1SoS96Sr4Cwy-BJxQ6TfOKjn4EHogk3Qc',
         'runner': M.run_hierarchical, 'target': None,
         'features': ['recencia_dias','frecuencia_compras','ticket_prom_k','n_categorias','meses_cliente','canal_digital'],
+        'min_features': 2,
         'criteria': {'silhouette': 0.30, 'cophenetic': 0.70},
         'business': {
             'problem': '⚠️ Un banco no sabe cuántos segmentos naturales existen en su cartera ni cómo de similares/distintos son entre sí. K-Means requiere fijar k a priori, lo cual es arbitrario.',
@@ -318,6 +325,8 @@ if 'results' not in st.session_state:
     st.session_state.results = {}
 if 'dataframes' not in st.session_state:
     st.session_state.dataframes = {}
+if 'feature_selections' not in st.session_state:
+    st.session_state.feature_selections = {}
 
 def get_df(model_name):
     cfg = MODEL_CONFIG[model_name]
@@ -326,14 +335,92 @@ def get_df(model_name):
         st.session_state.dataframes[key] = DATASETS[key]()
     return st.session_state.dataframes[key]
 
-def get_results(model_name):
+ID_LIKE_SUFFIXES = ('_id', '_real')
+NON_FEATURE_COLS = {'cluster', 'cluster_label', 'segmento_negocio',
+                     'segmento_real', 'tratamiento'}
+
+def get_feature_options(df, cfg):
+    exclude = set(NON_FEATURE_COLS)
+    if cfg.get('target'):
+        exclude.add(cfg['target'])
+    dtype_filter = cfg.get('feature_dtype', 'numeric')
+    cols = []
+    for c in df.columns:
+        if c in exclude or c.endswith(ID_LIKE_SUFFIXES):
+            continue
+        is_num = pd.api.types.is_numeric_dtype(df[c])
+        if dtype_filter == 'numeric' and not is_num:
+            continue
+        if dtype_filter == 'categorical' and is_num:
+            continue
+        cols.append(c)
+    return cols
+
+def get_results(model_name, features=None, target=None):
     if model_name not in st.session_state.results:
         cfg = MODEL_CONFIG[model_name]
         df = get_df(model_name)
+        runner = cfg['runner']
+        _params = inspect.signature(runner).parameters
         with st.spinner('Entrenando modelo...'):
-            result = cfg['runner'](df)
+            if cfg['key'] in ('elastic', 'basket', 'prophet'):
+                result = runner(df)
+            else:
+                kwargs: dict = {}
+                if features is not None:
+                    kwargs['features'] = features
+                if target is not None and 'target' in _params:
+                    kwargs['target'] = target
+                result = runner(df, **kwargs)
         st.session_state.results[model_name] = result
     return st.session_state.results[model_name]
+
+def render_generic_simulator(df, features, result_now, cfg):
+    st.caption('Simulador genérico — variables personalizadas')
+    inputs = {}
+    for f in features:
+        if pd.api.types.is_numeric_dtype(df[f]):
+            lo, hi, med = float(df[f].min()), float(df[f].max()), float(df[f].median())
+            inputs[f] = st.slider(f, lo, hi, med, key=f'gen_sim_{f}')
+        else:
+            inputs[f] = st.selectbox(f, sorted(df[f].dropna().unique()), key=f'gen_sim_{f}')
+    X_sim = pd.DataFrame([inputs], columns=features)
+
+    if 'model_t' in result_now:                        # uplift
+        X_s = result_now['scaler'].transform(X_sim)
+        p_t = result_now['model_t'].predict_proba(X_s)[0][1]
+        p_c = result_now['model_c'].predict_proba(X_s)[0][1]
+        st.metric('P(conv | tratado)', f'{p_t:.1%}')
+        st.metric('P(conv | sin campaña)', f'{p_c:.1%}')
+        st.metric('Uplift incremental', f'{p_t - p_c:+.1%}')
+    elif cfg['key'] == 'kmodes':                        # categórico, sin scaler
+        cluster_id = result_now['model'].predict(X_sim.values)[0]
+        st.metric('Perfil asignado', f'Perfil {cluster_id + 1}')
+        st.dataframe(result_now['cluster_modes'].iloc[[cluster_id]], hide_index=True)
+    elif cfg['key'] in ('rfm_kmeans', 'hierarchical'):  # clustering numérico
+        X_s = result_now['scaler'].transform(X_sim)
+        profiles = result_now['cluster_profiles']
+        if result_now.get('model') and hasattr(result_now['model'], 'predict'):
+            cluster_id = result_now['model'].predict(X_s)[0]
+        else:
+            feat_cols = [c for c in profiles.columns if c not in ('cluster', 'n')]
+            centroids_s = result_now['scaler'].transform(profiles[feat_cols].values)
+            cluster_id = np.linalg.norm(centroids_s - X_s, axis=1).argmin()
+        st.metric('Cluster / segmento asignado', str(profiles.iloc[cluster_id].get('cluster', cluster_id)))
+    elif 'classes' in result_now:                       # NBO (multiclase)
+        X_s = X_sim if 'scaler' not in result_now else result_now['scaler'].transform(X_sim)
+        probs = result_now['model'].predict_proba(X_s)[0]
+        ranked = sorted(zip(result_now['classes'], probs), key=lambda x: x[1], reverse=True)
+        for i, (prod, p) in enumerate(ranked[:3]):
+            st.markdown(f'**{i+1}.** {prod} — {p:.0%}')
+    elif 'model' in result_now and hasattr(result_now['model'], 'predict_proba'):  # clasificación binaria
+        X_s = X_sim if 'scaler' not in result_now else result_now['scaler'].transform(X_sim)
+        prob = result_now['model'].predict_proba(X_s)[0][1]
+        st.metric('Probabilidad', f'{prob:.1%}')
+    else:                                                # regresión (LTV)
+        X_s = X_sim if 'scaler' not in result_now else result_now['scaler'].transform(X_sim)
+        pred = result_now['model'].predict(X_s)[0]
+        st.metric('Predicción', f'{pred:,.2f}')
 
 # ── SIDEBAR ────────────────────────────────────────────────────────
 with st.sidebar:
@@ -381,11 +468,17 @@ with st.sidebar:
         st.session_state.dataframes[data_key_up] = df_up
         if model_name in st.session_state.results:
             del st.session_state.results[model_name]
-        st.success(f'{len(df_up)} filas cargadas ✓')
+        # Auto-seleccionar TODAS las columnas disponibles del CSV
+        all_available = get_feature_options(df_up, cfg_up)
+        st.session_state.feature_selections[data_key_up] = all_available
+        st.session_state.pop(f'featsel_{data_key_up}', None)
+        st.success(f'{len(df_up)} filas · {len(all_available)} variables cargadas ✓')
 
     if st.button('↺ Restaurar dataset de ejemplo'):
         st.session_state.dataframes.pop(data_key_up, None)
         st.session_state.results.pop(model_name, None)
+        st.session_state.feature_selections.pop(data_key_up, None)
+        st.session_state.pop(f'featsel_{data_key_up}', None)
         st.session_state.uploader_versions[data_key_up] = uploader_version + 1
         st.rerun()
 
@@ -393,6 +486,9 @@ with st.sidebar:
         st.session_state.results = {}
         st.session_state.dataframes = {}
         st.session_state.uploader_versions = {}
+        st.session_state.feature_selections = {}
+        for _k in [k for k in st.session_state.keys() if k.startswith('featsel_')]:
+            del st.session_state[_k]
         st.rerun()
 
     st.markdown('---')
@@ -400,6 +496,77 @@ with st.sidebar:
     st.markdown(f'<div style="font-size:11px;color:#555;margin-bottom:4px">{cfg_cur["badge"]}</div>', unsafe_allow_html=True)
     if cfg_cur.get('colab'):
         st.markdown(f'[↗ Abrir en Google Colab]({cfg_cur["colab"]})')
+
+    if cfg_cur['key'] not in ('elastic', 'basket', 'prophet'):
+        st.markdown('---')
+        data_key_sel = cfg_cur['data_key']
+        df_sel = get_df(model_name)
+        options = get_feature_options(df_sel, cfg_cur)
+        default_feats = [f for f in cfg_cur['features'] if f in options]
+        stored = st.session_state.feature_selections.get(data_key_sel, default_feats)
+        stored = [f for f in stored if f in options] or default_feats
+
+        widget_key = f'featsel_{data_key_sel}'
+        current_widget = (st.session_state[widget_key]
+                          if widget_key in st.session_state else stored)
+        has_pending = sorted(current_widget) != sorted(stored)
+
+        with st.expander('⚙️ Variables del modelo', expanded=has_pending):
+            selected = st.multiselect('Columnas de entrada (X)', options,
+                                       default=stored, key=widget_key)
+            min_f = cfg_cur.get('min_features', 1)
+            valid_selection = len(selected) >= min_f
+            if not valid_selection:
+                st.warning(f'Selecciona al menos {min_f} variable(s) para poder ejecutar.')
+            st.caption('Por defecto: ' + ', '.join(default_feats))
+
+        if has_pending:
+            st.warning('Cambios sin aplicar en las variables.')
+        if st.button('🔄 Ejecutar con estas variables', key=f'apply_featsel_{data_key_sel}',
+                      disabled=not valid_selection, type='primary', width="stretch"):
+            st.session_state.feature_selections[data_key_sel] = selected
+            st.session_state.results.pop(model_name, None)
+            st.rerun()
+
+        selected_features = st.session_state.feature_selections.get(data_key_sel, default_feats)
+        is_default_selection = (
+            selected_features == cfg_cur['features'] and
+            all(f in df_sel.columns for f in cfg_cur['features'])
+        )
+        # EDA usa el estado actual del widget (preview live, sin esperar "Ejecutar")
+        _wval = st.session_state.get(widget_key, selected_features)
+        eda_features = [f for f in _wval if f in options] or selected_features
+
+        # ── Selector dinámico de target ──────────────────────────────
+        if cfg_cur.get('target'):
+            st.markdown('---')
+            st.markdown('<div style="font-size:11px;color:#555;font-family:monospace;margin-bottom:4px">TARGET</div>', unsafe_allow_html=True)
+            _excl = set(options) | {'cluster', 'cluster_label', 'segmento_negocio',
+                                     'segmento_real', 'tratamiento'}
+            _target_options = [c for c in df_sel.columns if c not in _excl]
+            if not _target_options:
+                _target_options = [cfg_cur['target']]
+            _stored_target = st.session_state.get(f'target_sel_{data_key_sel}',
+                                                   cfg_cur['target'])
+            _stored_idx = (_target_options.index(_stored_target)
+                           if _stored_target in _target_options else 0)
+            selected_target = st.selectbox(
+                'Variable objetivo (Y)',
+                options=_target_options,
+                index=_stored_idx,
+                key=f'target_widget_{data_key_sel}',
+                help='Columna que el modelo predecirá. Cambia al cargar un CSV propio.',
+            )
+            if selected_target != st.session_state.get(f'target_sel_{data_key_sel}'):
+                st.session_state[f'target_sel_{data_key_sel}'] = selected_target
+                st.session_state.results.pop(model_name, None)
+        else:
+            selected_target = cfg_cur.get('target')
+    else:
+        selected_features = cfg_cur['features']
+        is_default_selection = True
+        eda_features = list(cfg_cur['features'])
+        selected_target = cfg_cur.get('target')
 
 # ── MAIN ────────────────────────────────────────────────────────────
 cfg = MODEL_CONFIG[model_name]
@@ -449,12 +616,12 @@ with phases[0]:
     with cola:
         st.code(cfg['business']['algo'], language='python')
     with colb:
-        if cfg['target']:
-            feat_tags = ' '.join([f'`{f}`' for f in cfg['features']])
+        if selected_target:
+            feat_tags = ' '.join([f'`{f}`' for f in selected_features])
             st.markdown(f'**Variables X:** {feat_tags}')
-            st.markdown(f'**Target Y:** `{cfg["target"]}`')
+            st.markdown(f'**Target Y:** `{selected_target}`')
         else:
-            feat_tags = ' '.join([f'`{f}`' for f in cfg['features']])
+            feat_tags = ' '.join([f'`{f}`' for f in selected_features])
             st.markdown(f'**Variables:** {feat_tags}')
             st.markdown('**Output:** Reglas de asociación (soporte, confianza, lift)')
 
@@ -468,7 +635,7 @@ with phases[1]:
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric('Registros', f'{len(df):,}')
     c2.metric('Variables', len(df.columns))
-    c3.metric('Variables X', len(cfg['features']))
+    c3.metric('Variables X', len(eda_features))
     c4.metric('Valores nulos', int(df.isnull().sum().sum()))
     c5.metric('Duplicados', int(df.duplicated().sum()))
 
@@ -485,69 +652,80 @@ with phases[1]:
 
     st.markdown('---')
     st.subheader('Estadísticas descriptivas')
-    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    if num_cols:
-        st.dataframe(df[num_cols].describe().round(2), width="stretch")
+    _tgt_stat = [selected_target] if selected_target and selected_target in df.columns else []
+    stat_cols = [c for c in (list(eda_features) + _tgt_stat)
+                 if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
+    if not stat_cols:  # fallback para modelos con features solo categóricas
+        stat_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if stat_cols:
+        st.dataframe(df[stat_cols].describe().round(2), width="stretch")
     else:
         st.info('No hay columnas numéricas en el dataset.')
 
     # Target distribution
-    if cfg['target'] and cfg['target'] in df.columns:
+    if selected_target and selected_target in df.columns:
         st.markdown('---')
         if cfg['key'] == 'prophet':
             st.subheader('Serie de tiempo histórica')
             date_col = 'fecha' if 'fecha' in df.columns else df.columns[0]
-            st.plotly_chart(P.plot_timeseries(df, date_col, cfg['target']),
+            st.plotly_chart(P.plot_timeseries(df, date_col, selected_target),
                             width="stretch", key='eda_timeseries')
         else:
             c_td, c_cb = st.columns(2)
             with c_td:
-                st.subheader(f'Distribución del target: `{cfg["target"]}`')
-                st.plotly_chart(P.plot_target_dist(df[cfg['target']], cfg['target']),
-                                width="stretch", key='eda_target_dist')
+                st.subheader(f'Distribución del target: `{selected_target}`')
+                st.plotly_chart(P.plot_target_dist(df[selected_target], selected_target),
+                                width="stretch", key=f'eda_target_dist_{selected_target}')
             with c_cb:
                 st.subheader('Correlación con el target')
-                num_feats = [f for f in cfg['features'] if f in df.columns
+                num_feats = [f for f in eda_features if f in df.columns
                              and pd.api.types.is_numeric_dtype(df[f])]
-                target_is_numeric = (cfg['target'] is not None
-                                      and pd.api.types.is_numeric_dtype(df[cfg['target']]))
+                target_is_numeric = pd.api.types.is_numeric_dtype(df[selected_target])
                 if num_feats and target_is_numeric:
-                    st.plotly_chart(P.plot_correlation_bar(df, num_feats, cfg['target']),
-                                    width="stretch", key='eda_corr_bar')
+                    st.plotly_chart(P.plot_correlation_bar(df, num_feats, selected_target),
+                                    width="stretch", key=f'eda_corr_bar_{"_".join(num_feats)}_{selected_target}')
                 elif num_feats:
                     st.info('El target es categórico — correlación de Pearson no aplica.')
 
-    # Histograms
-    num_feats_plot = [f for f in cfg['features']
+    # Histograms — usa eda_features para preview live sin necesitar "Ejecutar"
+    num_feats_plot = [f for f in eda_features
                       if f in df.columns and pd.api.types.is_numeric_dtype(df[f])]
     if num_feats_plot:
         st.markdown('---')
         st.subheader('Distribución de variables numéricas')
         st.plotly_chart(P.plot_histograms(df, num_feats_plot),
-                        width="stretch", key='eda_histograms')
+                        width="stretch", key=f'eda_histograms_{"_".join(num_feats_plot)}')
 
     # Boxplots by target for classification
-    if cfg['target'] and cfg['target'] in df.columns and model_name != 'LTV · Regresión Lineal' and cfg['key'] != 'prophet':
+    if selected_target and selected_target in df.columns and model_name != 'LTV · Regresión Lineal' and cfg['key'] != 'prophet':
         st.markdown('---')
         st.subheader('Variables por clase del target')
-        figs_box = P.plot_boxplots_by_target(df, num_feats_plot, cfg['target'])
+        figs_box = P.plot_boxplots_by_target(df, num_feats_plot, selected_target)
         if figs_box:
             cols_box = st.columns(min(2, len(figs_box)))
             for i, fig in enumerate(figs_box):
-                cols_box[i % 2].plotly_chart(fig, width="stretch", key=f'eda_box_{i}')
+                cols_box[i % 2].plotly_chart(fig, width="stretch", key=f'eda_box_{i}_{"_".join(num_feats_plot)}')
 
     # Correlation matrix
     if len(num_feats_plot) > 2:
         st.markdown('---')
         st.subheader('Matriz de correlaciones')
-        all_num = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])
-                   and c not in ['cliente_id','lead_id']][:10]
-        st.plotly_chart(P.plot_correlation_heatmap(df, all_num),
-                        width="stretch", key='eda_corr_heatmap')
+        corr_cols = list(num_feats_plot)
+        if (selected_target and selected_target in df.columns
+                and pd.api.types.is_numeric_dtype(df[selected_target])
+                and selected_target not in corr_cols):
+            corr_cols.append(selected_target)
+        st.plotly_chart(P.plot_correlation_heatmap(df, corr_cols[:10]),
+                        width="stretch", key=f'eda_corr_heatmap_{"_".join(corr_cols[:10])}')
 
-    # Category analysis
-    cat_cols = [c for c in df.columns
-                if df[c].dtype == 'object' and c not in ['cliente_id','lead_id','ticket_id','semana']]
+    # Category analysis — priorizar features categóricas seleccionadas (eda_features = live)
+    _id_cols = {'cliente_id', 'lead_id', 'ticket_id', 'semana'}
+    cat_cols_sel = [c for c in eda_features
+                    if c in df.columns and df[c].dtype == 'object']
+    cat_cols_all = [c for c in df.columns
+                    if df[c].dtype == 'object' and c not in _id_cols
+                    and c != selected_target]
+    cat_cols = cat_cols_sel if cat_cols_sel else cat_cols_all
     if cat_cols:
         st.markdown('---')
         st.subheader('Variables categóricas')
@@ -651,7 +829,7 @@ with phases[2]:
         'ventas': ('Renombrado a "y"', 'Convención de Prophet para la variable a pronosticar'),
     }
     trans_rows = []
-    for feat in cfg['features']:
+    for feat in selected_features:
         if feat in transforms:
             trans_rows.append({'Variable': feat,
                                'Transformación': transforms[feat][0],
@@ -660,11 +838,11 @@ with phases[2]:
             trans_rows.append({'Variable': feat,
                                'Transformación': 'Sin cambio',
                                'Motivo': 'Variable ya en escala adecuada'})
-    if cfg['target'] and cfg['target'] not in [r['Variable'] for r in trans_rows]:
-        if cfg['target'] in transforms:
-            trans_rows.append({'Variable': f'TARGET: {cfg["target"]}',
-                               'Transformación': transforms[cfg['target']][0],
-                               'Motivo': transforms[cfg['target']][1]})
+    if selected_target and selected_target not in [r['Variable'] for r in trans_rows]:
+        if selected_target in transforms:
+            trans_rows.append({'Variable': f'TARGET: {selected_target}',
+                               'Transformación': transforms[selected_target][0],
+                               'Motivo': transforms[selected_target][1]})
 
     st.dataframe(pd.DataFrame(trans_rows), width="stretch", hide_index=True)
 
@@ -725,13 +903,34 @@ with phases[2]:
             ('engagement_score', '(1/recencia_dias) × frecuencia_compras × canal_digital', 'Score sintético de engagement'),
         ],
     }
-    fe_rows = fe_map.get(model_name, [])
+    fe_rows_all = fe_map.get(model_name, [])
+    fe_rows = []
+    for name, formula, desc in fe_rows_all:
+        depends_on = [f for f in cfg['features'] if f in formula]
+        if all(f in selected_features for f in depends_on):
+            fe_rows.append((name, formula, desc))
+
+    new_vars = [f for f in selected_features if f not in cfg['features']]
+
     if fe_rows:
         cols_fe = st.columns(len(fe_rows))
         for i, (name, formula, desc) in enumerate(fe_rows):
             with cols_fe[i]:
                 st.code(f'{name} = {formula}', language='python')
                 st.caption(desc)
+    elif fe_rows_all:
+        st.info('Las transformaciones de feature engineering de este modelo dependen de variables que fueron excluidas de la selección actual.')
+
+    if new_vars:
+        if fe_rows or fe_rows_all:
+            st.markdown('---')
+        st.markdown('**Variables adicionales seleccionadas** (sin transformación predefinida — se usan directamente como entrada al modelo):')
+        cols_nv = st.columns(min(3, len(new_vars)))
+        for i, v in enumerate(new_vars):
+            with cols_nv[i % 3]:
+                st.code(f'{v}  # sin transformación', language='python')
+                dtype_label = 'numérica' if pd.api.types.is_numeric_dtype(df[v]) else 'categórica'
+                st.caption(f'Variable {dtype_label} del dataset')
 
 # ══════════════════════════════════════════════════════════════════
 # FASE 4: MODELING
@@ -804,16 +1003,16 @@ with phases[3]:
                 st.session_state.results[model_name] = result
         elif cfg['key'] == 'rfm_kmeans':
             k = n_clusters_km if 'n_clusters_km' in dir() else 4
-            result = M.run_kmeans(df, n_clusters=k)
+            result = M.run_kmeans(df, n_clusters=k, features=selected_features)
             st.session_state.results[model_name] = result
         elif cfg['key'] == 'kmodes':
             k = n_clusters_kmo if 'n_clusters_kmo' in dir() else 3
-            result = M.run_kmodes(df, n_clusters=k)
+            result = M.run_kmodes(df, n_clusters=k, features=selected_features)
             st.session_state.results[model_name] = result
         elif cfg['key'] == 'hierarchical':
             k    = n_clusters_hc    if 'n_clusters_hc'    in dir() else 4
             link = linkage_method   if 'linkage_method'   in dir() else 'ward'
-            result = M.run_hierarchical(df, n_clusters=k, linkage=link)
+            result = M.run_hierarchical(df, n_clusters=k, linkage=link, features=selected_features)
             st.session_state.results[model_name] = result
         elif cfg['key'] == 'prophet':
             h  = horizon   if 'horizon'   in dir() else 30
@@ -827,7 +1026,7 @@ with phases[3]:
                                        weekly_seasonality=wo)
             st.session_state.results[model_name] = result
         else:
-            result = get_results(model_name)
+            result = get_results(model_name, selected_features, selected_target)
 
         if result is None:
             st.error('No se pudo entrenar el modelo. Verifica que el CSV tenga las columnas requeridas.')
@@ -894,11 +1093,11 @@ with phases[3]:
             if 'feature_importance' in result_now:
                 st.subheader('Importancia de variables')
                 st.plotly_chart(P.plot_feature_importance(result_now['feature_importance']),
-                                width="stretch", key='mod_feat_importance')
+                                width="stretch", key=f'mod_feat_importance_{"_".join(sorted(result_now["feature_importance"]))}')
             elif 'coefficients' in result_now:
                 st.subheader('Coeficientes del modelo')
                 st.plotly_chart(P.plot_coeff_bar(result_now['coefficients']),
-                                width="stretch", key='mod_coeff_bar')
+                                width="stretch", key=f'mod_coeff_bar_{"_".join(result_now["coefficients"]["feature"].tolist())}')
             elif cfg['key'] == 'elastic' and 'elasticity_by_cat' in result_now:
                 st.subheader('Elasticidad por categoría')
                 ec = result_now['elasticity_by_cat']
@@ -926,51 +1125,60 @@ with phases[3]:
             st.caption('Ajusta los valores y obtén la predicción del modelo entrenado')
 
             if cfg['key'] == 'churn' and result_now.get('model'):
-                d = st.slider('Días inactivo', 0, 90, 15)
-                q = st.slider('Quejas', 0, 10, 1)
-                l = st.slider('Logins (30d)', 0, 30, 14)
-                s = st.slider('Saldo (S/.k)', 0.0, 50.0, 12.0)
-                p = st.slider('Productos activos', 1, 6, 3)
-                X_sim = pd.DataFrame([[d,q,l,s,p]], columns=result_now['features'])
-                prob = result_now['model'].predict_proba(X_sim)[0][1]
-                pct_s = int(prob*100)
-                st.metric('Score de churn', f'{pct_s}%')
-                if prob >= 0.65:
-                    st.markdown(f'<div class="prob-high">🚨 <b>Riesgo alto</b> · Llamada del asesor en 24h. Oferta de retención personalizada.</div>', unsafe_allow_html=True)
-                elif prob >= 0.35:
-                    st.markdown(f'<div class="prob-med">⚠️ <b>Riesgo medio</b> · Email + beneficio exclusivo. Encuesta de satisfacción.</div>', unsafe_allow_html=True)
+                if is_default_selection:
+                    d = st.slider('Días inactivo', 0, 90, 15)
+                    q = st.slider('Quejas', 0, 10, 1)
+                    l = st.slider('Logins (30d)', 0, 30, 14)
+                    s = st.slider('Saldo (S/.k)', 0.0, 50.0, 12.0)
+                    p = st.slider('Productos activos', 1, 6, 3)
+                    X_sim = pd.DataFrame([[d,q,l,s,p]], columns=result_now['features'])
+                    prob = result_now['model'].predict_proba(X_sim)[0][1]
+                    pct_s = int(prob*100)
+                    st.metric('Score de churn', f'{pct_s}%')
+                    if prob >= 0.65:
+                        st.markdown(f'<div class="prob-high">🚨 <b>Riesgo alto</b> · Llamada del asesor en 24h. Oferta de retención personalizada.</div>', unsafe_allow_html=True)
+                    elif prob >= 0.35:
+                        st.markdown(f'<div class="prob-med">⚠️ <b>Riesgo medio</b> · Email + beneficio exclusivo. Encuesta de satisfacción.</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'<div class="prob-low">✅ <b>Riesgo bajo</b> · Mantener engagement. Cross-sell de producto complementario.</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown(f'<div class="prob-low">✅ <b>Riesgo bajo</b> · Mantener engagement. Cross-sell de producto complementario.</div>', unsafe_allow_html=True)
+                    render_generic_simulator(df, selected_features, result_now, cfg)
 
             elif cfg['key'] == 'logit' and result_now.get('model'):
-                d = st.slider('Días desde contacto', 1, 30, 7)
-                w = st.slider('Interacciones web', 0, 20, 6)
-                c = st.slider('Clicks en precio', 0, 10, 3)
-                t = st.slider('Tiempo en página (min)', 0, 30, 8)
-                X_sim = result_now['scaler'].transform([[d, w, c, t]])
-                prob = result_now['model'].predict_proba(X_sim)[0][1]
-                pct_s = int(prob*100)
-                st.metric('P(matrícula)', f'{pct_s}%')
-                if prob >= 0.65:
-                    st.markdown(f'<div class="prob-low">✅ <b>PRIORIDAD ALTA</b> · Llamar hoy. Probabilidad de conversión: {pct_s}%</div>', unsafe_allow_html=True)
-                elif prob >= 0.40:
-                    st.markdown(f'<div class="prob-med">⚠️ <b>PRIORIDAD MEDIA</b> · Nutrir con contenido. Re-evaluar en 3 días.</div>', unsafe_allow_html=True)
+                if is_default_selection:
+                    d = st.slider('Días desde contacto', 1, 30, 7)
+                    w = st.slider('Interacciones web', 0, 20, 6)
+                    c = st.slider('Clicks en precio', 0, 10, 3)
+                    t = st.slider('Tiempo en página (min)', 0, 30, 8)
+                    X_sim = result_now['scaler'].transform([[d, w, c, t]])
+                    prob = result_now['model'].predict_proba(X_sim)[0][1]
+                    pct_s = int(prob*100)
+                    st.metric('P(matrícula)', f'{pct_s}%')
+                    if prob >= 0.65:
+                        st.markdown(f'<div class="prob-low">✅ <b>PRIORIDAD ALTA</b> · Llamar hoy. Probabilidad de conversión: {pct_s}%</div>', unsafe_allow_html=True)
+                    elif prob >= 0.40:
+                        st.markdown(f'<div class="prob-med">⚠️ <b>PRIORIDAD MEDIA</b> · Nutrir con contenido. Re-evaluar en 3 días.</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'<div class="prob-high">❌ <b>PRIORIDAD BAJA</b> · Automatizar. Re-evaluar en 7 días.</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown(f'<div class="prob-high">❌ <b>PRIORIDAD BAJA</b> · Automatizar. Re-evaluar en 7 días.</div>', unsafe_allow_html=True)
+                    render_generic_simulator(df, selected_features, result_now, cfg)
 
             elif cfg['key'] == 'ltv' and result_now.get('model'):
-                c_s = st.slider('Compras últimos 6m', 1, 20, 6)
-                t_s = st.slider('Ticket promedio (S/.)', 50, 800, 200, 10)
-                m_s = st.slider('Meses como cliente', 1, 60, 18)
-                k_s = st.slider('Categorías distintas', 1, 8, 3)
-                digital_s = st.selectbox('Canal digital', [0, 1], format_func=lambda x: 'Sí' if x else 'No')
-                X_sim = pd.DataFrame([[c_s,t_s,m_s,k_s,digital_s]], columns=result_now['features'])
-                ltv_pred = result_now['model'].predict(X_sim)[0]
-                st.metric('LTV estimado (12m)', f'S/.{max(ltv_pred,0):,.0f}')
-                seg = 'VIP 🏆' if ltv_pred>5000 else ('Regular' if ltv_pred>1500 else 'Bajo')
-                cac_max = 500 if ltv_pred>5000 else (150 if ltv_pred>1500 else 50)
-                st.metric('Segmento', seg)
-                st.markdown(f'<div class="criteria-box">CAC máximo recomendado: <b>S/.{cac_max}</b> (ratio LTV:CAC ≥ 10:1)</div>', unsafe_allow_html=True)
+                if is_default_selection:
+                    c_s = st.slider('Compras últimos 6m', 1, 20, 6)
+                    t_s = st.slider('Ticket promedio (S/.)', 50, 800, 200, 10)
+                    m_s = st.slider('Meses como cliente', 1, 60, 18)
+                    k_s = st.slider('Categorías distintas', 1, 8, 3)
+                    digital_s = st.selectbox('Canal digital', [0, 1], format_func=lambda x: 'Sí' if x else 'No')
+                    X_sim = pd.DataFrame([[c_s,t_s,m_s,k_s,digital_s]], columns=result_now['features'])
+                    ltv_pred = result_now['model'].predict(X_sim)[0]
+                    st.metric('LTV estimado (12m)', f'S/.{max(ltv_pred,0):,.0f}')
+                    seg = 'VIP 🏆' if ltv_pred>5000 else ('Regular' if ltv_pred>1500 else 'Bajo')
+                    cac_max = 500 if ltv_pred>5000 else (150 if ltv_pred>1500 else 50)
+                    st.metric('Segmento', seg)
+                    st.markdown(f'<div class="criteria-box">CAC máximo recomendado: <b>S/.{cac_max}</b> (ratio LTV:CAC ≥ 10:1)</div>', unsafe_allow_html=True)
+                else:
+                    render_generic_simulator(df, selected_features, result_now, cfg)
 
             elif cfg['key'] == 'elastic' and result_now.get('model'):
                 p_base = st.slider('Precio base (S/.)', 50, 500, 150, 5)
@@ -999,128 +1207,149 @@ with phases[3]:
                     st.info('No hay reglas con los umbrales actuales. Reduce los valores.')
 
             elif cfg['key'] == 'nbo' and result_now.get('model'):
-                tc_s = st.selectbox('Tarjeta crédito', [0,1], format_func=lambda x: 'Sí' if x else 'No')
-                ca_s = st.selectbox('Cuenta ahorros', [0,1], format_func=lambda x: 'Sí' if x else 'No')
-                seg_s = st.selectbox('Seguro vida', [0,1], format_func=lambda x: 'Sí' if x else 'No')
-                pr_s = st.selectbox('Préstamo personal', [0,1], format_func=lambda x: 'Sí' if x else 'No')
-                ant_s = st.slider('Antigüedad (meses)', 1, 60, 24)
-                sal_s = st.slider('Saldo (S/.k)', 1.0, 50.0, 10.0)
-                X_sim = pd.DataFrame([[tc_s,ca_s,seg_s,pr_s,ant_s,sal_s]],
-                                      columns=result_now['features'])
-                probs = result_now['model'].predict_proba(X_sim)[0]
-                ranked = sorted(zip(result_now['classes'], probs),
-                                key=lambda x: x[1], reverse=True)
-                st.markdown('**Top 3 recomendaciones:**')
-                for i, (prod, p) in enumerate(ranked[:3]):
-                    st.markdown(f'**{i+1}.** {prod} — {p:.0%}')
+                if is_default_selection:
+                    tc_s = st.selectbox('Tarjeta crédito', [0,1], format_func=lambda x: 'Sí' if x else 'No')
+                    ca_s = st.selectbox('Cuenta ahorros', [0,1], format_func=lambda x: 'Sí' if x else 'No')
+                    seg_s = st.selectbox('Seguro vida', [0,1], format_func=lambda x: 'Sí' if x else 'No')
+                    pr_s = st.selectbox('Préstamo personal', [0,1], format_func=lambda x: 'Sí' if x else 'No')
+                    ant_s = st.slider('Antigüedad (meses)', 1, 60, 24)
+                    sal_s = st.slider('Saldo (S/.k)', 1.0, 50.0, 10.0)
+                    X_sim = pd.DataFrame([[tc_s,ca_s,seg_s,pr_s,ant_s,sal_s]],
+                                          columns=result_now['features'])
+                    probs = result_now['model'].predict_proba(X_sim)[0]
+                    ranked = sorted(zip(result_now['classes'], probs),
+                                    key=lambda x: x[1], reverse=True)
+                    st.markdown('**Top 3 recomendaciones:**')
+                    for i, (prod, p) in enumerate(ranked[:3]):
+                        st.markdown(f'**{i+1}.** {prod} — {p:.0%}')
+                else:
+                    render_generic_simulator(df, selected_features, result_now, cfg)
 
             elif cfg['key'] == 'propension' and result_now.get('model'):
-                rec_s = st.slider('Recencia (días)', 1, 120, 30)
-                comp_s = st.slider('Compras últimos 12m', 0, 15, 4)
-                eng_s = st.slider('Engagement score', 10, 100, 55)
-                cd_s = st.selectbox('Canal digital', [0,1], format_func=lambda x: 'Sí' if x else 'No', key='sim_cd')
-                edad_s = st.slider('Edad', 22, 65, 38)
-                np_s = st.slider('Nº productos', 1, 5, 2)
-                X_sim = pd.DataFrame([[rec_s,comp_s,eng_s,cd_s,edad_s,np_s]],
-                                      columns=result_now['features'])
-                prob = result_now['model'].predict_proba(X_sim)[0][1]
-                pct_s = int(prob * 100)
-                st.metric('P(compra próximos 15d)', f'{pct_s}%')
-                if prob >= 0.65:
-                    st.markdown('<div class="prob-low">✅ <b>ALTA PROPENSIÓN</b> · Contactar esta semana. Canal preferido: digital.</div>', unsafe_allow_html=True)
-                elif prob >= 0.35:
-                    st.markdown('<div class="prob-med">⚠️ <b>PROPENSIÓN MEDIA</b> · Incluir en campaña email + retargeting.</div>', unsafe_allow_html=True)
+                if is_default_selection:
+                    rec_s = st.slider('Recencia (días)', 1, 120, 30)
+                    comp_s = st.slider('Compras últimos 12m', 0, 15, 4)
+                    eng_s = st.slider('Engagement score', 10, 100, 55)
+                    cd_s = st.selectbox('Canal digital', [0,1], format_func=lambda x: 'Sí' if x else 'No', key='sim_cd')
+                    edad_s = st.slider('Edad', 22, 65, 38)
+                    np_s = st.slider('Nº productos', 1, 5, 2)
+                    X_sim = pd.DataFrame([[rec_s,comp_s,eng_s,cd_s,edad_s,np_s]],
+                                          columns=result_now['features'])
+                    prob = result_now['model'].predict_proba(X_sim)[0][1]
+                    pct_s = int(prob * 100)
+                    st.metric('P(compra próximos 15d)', f'{pct_s}%')
+                    if prob >= 0.65:
+                        st.markdown('<div class="prob-low">✅ <b>ALTA PROPENSIÓN</b> · Contactar esta semana. Canal preferido: digital.</div>', unsafe_allow_html=True)
+                    elif prob >= 0.35:
+                        st.markdown('<div class="prob-med">⚠️ <b>PROPENSIÓN MEDIA</b> · Incluir en campaña email + retargeting.</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="prob-high">❌ <b>BAJA PROPENSIÓN</b> · Excluir de campaña. Nutrir con contenido.</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown('<div class="prob-high">❌ <b>BAJA PROPENSIÓN</b> · Excluir de campaña. Nutrir con contenido.</div>', unsafe_allow_html=True)
+                    render_generic_simulator(df, selected_features, result_now, cfg)
 
             elif cfg['key'] == 'winloss' and result_now.get('model'):
-                mont_s = st.slider('Monto oportunidad (S/.k)', 10, 500, 80, 10)
-                dias_s = st.slider('Días en pipeline', 7, 180, 45)
-                reun_s = st.slider('Reuniones realizadas', 1, 10, 3)
-                comp_s = st.slider('Competidores', 0, 4, 2)
-                dm_s = st.slider('Decision makers', 1, 5, 2)
-                prop_s = st.selectbox('Propuesta personalizada', [0,1], format_func=lambda x: 'Sí' if x else 'No', key='sim_prop')
-                X_sim = pd.DataFrame([[mont_s,dias_s,reun_s,comp_s,dm_s,prop_s]],
-                                      columns=result_now['features'])
-                prob = result_now['model'].predict_proba(X_sim)[0][1]
-                pct_s = int(prob * 100)
-                st.metric('P(ganar deal)', f'{pct_s}%')
-                if prob >= 0.65:
-                    st.markdown('<div class="prob-low">✅ <b>DEAL CALIENTE</b> · Priorizar. Asignar ejecutivo senior.</div>', unsafe_allow_html=True)
-                elif prob >= 0.35:
-                    st.markdown('<div class="prob-med">⚠️ <b>DEAL EN RIESGO</b> · Activar diferenciadores. Revisar propuesta.</div>', unsafe_allow_html=True)
+                if is_default_selection:
+                    mont_s = st.slider('Monto oportunidad (S/.k)', 10, 500, 80, 10)
+                    dias_s = st.slider('Días en pipeline', 7, 180, 45)
+                    reun_s = st.slider('Reuniones realizadas', 1, 10, 3)
+                    comp_s = st.slider('Competidores', 0, 4, 2)
+                    dm_s = st.slider('Decision makers', 1, 5, 2)
+                    prop_s = st.selectbox('Propuesta personalizada', [0,1], format_func=lambda x: 'Sí' if x else 'No', key='sim_prop')
+                    X_sim = pd.DataFrame([[mont_s,dias_s,reun_s,comp_s,dm_s,prop_s]],
+                                          columns=result_now['features'])
+                    prob = result_now['model'].predict_proba(X_sim)[0][1]
+                    pct_s = int(prob * 100)
+                    st.metric('P(ganar deal)', f'{pct_s}%')
+                    if prob >= 0.65:
+                        st.markdown('<div class="prob-low">✅ <b>DEAL CALIENTE</b> · Priorizar. Asignar ejecutivo senior.</div>', unsafe_allow_html=True)
+                    elif prob >= 0.35:
+                        st.markdown('<div class="prob-med">⚠️ <b>DEAL EN RIESGO</b> · Activar diferenciadores. Revisar propuesta.</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="prob-high">❌ <b>DEAL FRÍO</b> · Evaluar si vale continuar. Costo de oportunidad alto.</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown('<div class="prob-high">❌ <b>DEAL FRÍO</b> · Evaluar si vale continuar. Costo de oportunidad alto.</div>', unsafe_allow_html=True)
+                    render_generic_simulator(df, selected_features, result_now, cfg)
 
             elif cfg['key'] == 'uplift' and result_now.get('model_t'):
-                edad_s = st.slider('Edad', 20, 65, 38)
-                rec_s = st.slider('Recencia (días)', 1, 90, 20)
-                comp_s = st.slider('Compras previas', 0, 12, 3)
-                tick_s = st.slider('Ticket promedio (S/.k)', 0.5, 20.0, 4.0)
-                cd_s = st.selectbox('Canal digital', [0,1], format_func=lambda x: 'Sí' if x else 'No', key='sim_upl')
-                X_sim_raw = np.array([[edad_s, rec_s, comp_s, tick_s, cd_s]])
-                X_sim_s = result_now['scaler'].transform(X_sim_raw)
-                p_t = result_now['model_t'].predict_proba(X_sim_s)[0][1]
-                p_c = result_now['model_c'].predict_proba(X_sim_s)[0][1]
-                uplift = p_t - p_c
-                st.metric('P(conv | tratado)', f'{p_t:.1%}')
-                st.metric('P(conv | sin campaña)', f'{p_c:.1%}')
-                st.metric('Uplift incremental', f'{uplift:+.1%}')
-                if uplift >= 0.15:
-                    st.markdown('<div class="prob-low">✅ <b>PERSUADIBLE</b> · Incluir en campaña. Alto impacto incremental.</div>', unsafe_allow_html=True)
-                elif uplift >= 0.05:
-                    st.markdown('<div class="prob-med">⚠️ <b>RESPONDE ALGO</b> · Incluir solo si hay presupuesto disponible.</div>', unsafe_allow_html=True)
+                if is_default_selection:
+                    edad_s = st.slider('Edad', 20, 65, 38)
+                    rec_s = st.slider('Recencia (días)', 1, 90, 20)
+                    comp_s = st.slider('Compras previas', 0, 12, 3)
+                    tick_s = st.slider('Ticket promedio (S/.k)', 0.5, 20.0, 4.0)
+                    cd_s = st.selectbox('Canal digital', [0,1], format_func=lambda x: 'Sí' if x else 'No', key='sim_upl')
+                    X_sim_raw = np.array([[edad_s, rec_s, comp_s, tick_s, cd_s]])
+                    X_sim_s = result_now['scaler'].transform(X_sim_raw)
+                    p_t = result_now['model_t'].predict_proba(X_sim_s)[0][1]
+                    p_c = result_now['model_c'].predict_proba(X_sim_s)[0][1]
+                    uplift = p_t - p_c
+                    st.metric('P(conv | tratado)', f'{p_t:.1%}')
+                    st.metric('P(conv | sin campaña)', f'{p_c:.1%}')
+                    st.metric('Uplift incremental', f'{uplift:+.1%}')
+                    if uplift >= 0.15:
+                        st.markdown('<div class="prob-low">✅ <b>PERSUADIBLE</b> · Incluir en campaña. Alto impacto incremental.</div>', unsafe_allow_html=True)
+                    elif uplift >= 0.05:
+                        st.markdown('<div class="prob-med">⚠️ <b>RESPONDE ALGO</b> · Incluir solo si hay presupuesto disponible.</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="prob-high">❌ <b>NO PERSUADIBLE</b> · Excluir de campaña. Compraría igual o no responde.</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown('<div class="prob-high">❌ <b>NO PERSUADIBLE</b> · Excluir de campaña. Compraría igual o no responde.</div>', unsafe_allow_html=True)
+                    render_generic_simulator(df, selected_features, result_now, cfg)
 
             elif cfg['key'] == 'rfm_kmeans' and result_now and result_now.get('model'):
-                rec_s  = st.slider('Recencia (días)',      1, 180, 30)
-                frec_s = st.slider('Frecuencia compras',   1, 30,  8)
-                mont_s = st.slider('Monto total (S/.k)',   0.5, 25.0, 6.0)
-                X_raw  = np.array([[rec_s, frec_s, mont_s]])
-                X_sc   = result_now['scaler'].transform(X_raw)
-                cluster_id = result_now['model'].predict(X_sc)[0]
-                st.metric('Cluster asignado', f'Cluster {cluster_id + 1}')
-                profile_row = result_now['cluster_profiles'].iloc[cluster_id]
-                st.markdown(f'**Perfil medio del cluster:** '
-                            f'Recencia {profile_row["recencia_dias"]:.0f}d · '
-                            f'Frec {profile_row["frecuencia_compras"]:.0f} · '
-                            f'Monto S/.{profile_row["monto_total_k"]:.1f}k')
+                if is_default_selection:
+                    rec_s  = st.slider('Recencia (días)',      1, 180, 30)
+                    frec_s = st.slider('Frecuencia compras',   1, 30,  8)
+                    mont_s = st.slider('Monto total (S/.k)',   0.5, 25.0, 6.0)
+                    X_raw  = np.array([[rec_s, frec_s, mont_s]])
+                    X_sc   = result_now['scaler'].transform(X_raw)
+                    cluster_id = result_now['model'].predict(X_sc)[0]
+                    st.metric('Cluster asignado', f'Cluster {cluster_id + 1}')
+                    profile_row = result_now['cluster_profiles'].iloc[cluster_id]
+                    st.markdown(f'**Perfil medio del cluster:** '
+                                f'Recencia {profile_row["recencia_dias"]:.0f}d · '
+                                f'Frec {profile_row["frecuencia_compras"]:.0f} · '
+                                f'Monto S/.{profile_row["monto_total_k"]:.1f}k')
+                else:
+                    render_generic_simulator(df, selected_features, result_now, cfg)
 
             elif cfg['key'] == 'hierarchical' and result_now and result_now.get('model'):
-                rec_s  = st.slider('Recencia (días)',       1, 180, 30)
-                frec_s = st.slider('Frecuencia compras',    1, 25,  8)
-                tick_s = st.slider('Ticket promedio (S/.k)',0.5, 20.0, 5.0)
-                cat_s  = st.slider('N° categorías',         1, 8,   3)
-                ant_s  = st.slider('Antigüedad (meses)',    1, 60,  18)
-                dig_s  = st.selectbox('Canal digital', [0,1], format_func=lambda x: 'Sí' if x else 'No', key='sim_hc')
-                X_raw  = np.array([[rec_s, frec_s, tick_s, cat_s, ant_s, dig_s]])
-                X_sc   = result_now['scaler'].transform(X_raw)
-                # Hierarchical no tiene predict → asignar por distancia al centroide
-                profiles = result_now['cluster_profiles']
-                feat_cols = [c for c in profiles.columns if c not in ('cluster','n')]
-                centroids = profiles[feat_cols].values
-                centroids_sc = result_now['scaler'].transform(centroids)
-                dists = np.linalg.norm(centroids_sc - X_sc, axis=1)
-                cluster_id = dists.argmin()
-                seg_name = profiles.iloc[cluster_id]['cluster']
-                st.metric('Segmento asignado', seg_name)
-                st.caption(f'Distancia al centroide: {dists[cluster_id]:.3f}')
+                if is_default_selection:
+                    rec_s  = st.slider('Recencia (días)',       1, 180, 30)
+                    frec_s = st.slider('Frecuencia compras',    1, 25,  8)
+                    tick_s = st.slider('Ticket promedio (S/.k)',0.5, 20.0, 5.0)
+                    cat_s  = st.slider('N° categorías',         1, 8,   3)
+                    ant_s  = st.slider('Antigüedad (meses)',    1, 60,  18)
+                    dig_s  = st.selectbox('Canal digital', [0,1], format_func=lambda x: 'Sí' if x else 'No', key='sim_hc')
+                    X_raw  = np.array([[rec_s, frec_s, tick_s, cat_s, ant_s, dig_s]])
+                    X_sc   = result_now['scaler'].transform(X_raw)
+                    # Hierarchical no tiene predict → asignar por distancia al centroide
+                    profiles = result_now['cluster_profiles']
+                    feat_cols = [c for c in profiles.columns if c not in ('cluster','n')]
+                    centroids = profiles[feat_cols].values
+                    centroids_sc = result_now['scaler'].transform(centroids)
+                    dists = np.linalg.norm(centroids_sc - X_sc, axis=1)
+                    cluster_id = dists.argmin()
+                    seg_name = profiles.iloc[cluster_id]['cluster']
+                    st.metric('Segmento asignado', seg_name)
+                    st.caption(f'Distancia al centroide: {dists[cluster_id]:.3f}')
+                else:
+                    render_generic_simulator(df, selected_features, result_now, cfg)
 
             elif cfg['key'] == 'kmodes' and result_now and result_now.get('model'):
-                st.info('K-Modes clasifica nuevos registros por moda. '
-                        'Ingresa los atributos para asignar el perfil.')
-                canal_s = st.selectbox('Canal', ['Google Ads','Facebook','Email','Orgánico','Referido'])
-                cat_s   = st.selectbox('Categoría', ['Tecnología','Moda','Hogar','Deportes','Libros'])
-                frec_s  = st.selectbox('Frecuencia', ['Diaria','Semanal','Mensual','Esporádica'])
-                reg_s   = st.selectbox('Región', ['Lima','Arequipa','Trujillo','Cusco','Otra'])
-                edad_s  = st.selectbox('Edad', ['18-24','25-34','35-44','45-54','55+'])
-                disp_s  = st.selectbox('Dispositivo', ['Móvil','Desktop','Tablet'])
-                X_new   = np.array([[canal_s, cat_s, frec_s, reg_s, edad_s, disp_s]])
-                cluster_id = result_now['model'].predict(X_new)[0]
-                st.metric('Perfil asignado', f'Perfil {cluster_id + 1}')
-                st.dataframe(result_now['cluster_modes'].iloc[[cluster_id]],
-                             width="stretch", hide_index=True)
+                if is_default_selection:
+                    st.info('K-Modes clasifica nuevos registros por moda. '
+                            'Ingresa los atributos para asignar el perfil.')
+                    canal_s = st.selectbox('Canal', ['Google Ads','Facebook','Email','Orgánico','Referido'])
+                    cat_s   = st.selectbox('Categoría', ['Tecnología','Moda','Hogar','Deportes','Libros'])
+                    frec_s  = st.selectbox('Frecuencia', ['Diaria','Semanal','Mensual','Esporádica'])
+                    reg_s   = st.selectbox('Región', ['Lima','Arequipa','Trujillo','Cusco','Otra'])
+                    edad_s  = st.selectbox('Edad', ['18-24','25-34','35-44','45-54','55+'])
+                    disp_s  = st.selectbox('Dispositivo', ['Móvil','Desktop','Tablet'])
+                    X_new   = np.array([[canal_s, cat_s, frec_s, reg_s, edad_s, disp_s]])
+                    cluster_id = result_now['model'].predict(X_new)[0]
+                    st.metric('Perfil asignado', f'Perfil {cluster_id + 1}')
+                    st.dataframe(result_now['cluster_modes'].iloc[[cluster_id]],
+                                 width="stretch", hide_index=True)
+                else:
+                    render_generic_simulator(df, selected_features, result_now, cfg)
 
             elif cfg['key'] == 'prophet' and result_now.get('model'):
                 dias_futuro = st.slider('Días a futuro', 1, 90, 30)
@@ -1148,7 +1377,7 @@ with phases[4]:
 
     result_ev = st.session_state.results.get(model_name)
     if result_ev is None:
-        result_ev = get_results(model_name)
+        result_ev = get_results(model_name, selected_features, selected_target)
 
     if result_ev is None or 'error' in result_ev:
         st.warning('Entrena el modelo primero (Fase 4 → ▶ Entrenar modelo)')
@@ -1180,11 +1409,14 @@ with phases[4]:
                 st.plotly_chart(P.plot_elbow_curve(result_ev['elbow_data']),
                                 width="stretch", key='eval_elbow')
             with col_sc:
-                st.subheader('Scatter RFM por cluster')
-                if all(c in result_ev['df_scored'].columns for c in ['recencia_dias','monto_total_k']):
-                    st.plotly_chart(P.plot_cluster_scatter_2d(
-                        result_ev['df_scored'], 'recencia_dias', 'monto_total_k'),
-                        width="stretch", key='eval_rfm_scatter')
+                st.subheader('Scatter por cluster')
+                _scatter_feats = result_ev.get('features', [])
+                if len(_scatter_feats) >= 2:
+                    _x, _y = _scatter_feats[0], _scatter_feats[1]
+                    if _x in result_ev['df_scored'].columns and _y in result_ev['df_scored'].columns:
+                        st.plotly_chart(P.plot_cluster_scatter_2d(
+                            result_ev['df_scored'], _x, _y),
+                            width="stretch", key=f'eval_rfm_scatter_{_x}_{_y}')
 
             st.markdown('---')
             st.subheader('Perfil de clusters')
@@ -1327,7 +1559,8 @@ with phases[4]:
                 st.subheader('Predicho vs Real')
                 st.plotly_chart(P.plot_actual_vs_predicted(
                     result_ev['y_test'], result_ev['y_pred'],
-                    cfg['target']), width="stretch", key='eval_actual_vs_pred')
+                    result_ev.get('target', cfg['target'])),
+                    width="stretch", key='eval_actual_vs_pred')
             with col_res_dist:
                 st.subheader('Distribución de residuos')
                 residuals = np.array(result_ev['y_test']) - np.array(result_ev['y_pred'])

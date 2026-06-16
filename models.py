@@ -20,13 +20,16 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ── CHURN ──────────────────────────────────────────────────────────
-def run_churn(df):
-    features = ['dias_inactivo', 'quejas', 'logins_30d',
+def run_churn(df, features: list[str] | None = None, target: str | None = None):
+    DEFAULT_FEATURES = ['dias_inactivo', 'quejas', 'logins_30d',
                 'saldo_prom_k', 'productos']
-    target = 'churn'
-    feats_available = [f for f in features if f in df.columns]
+    target = target or 'churn'
+    feats = features if features else DEFAULT_FEATURES
+    feats_available = [f for f in feats if f in df.columns]
     if target not in df.columns:
         return None
+    if not feats_available:
+        return {'error': 'Selecciona al menos una variable disponible en el dataset.'}
     X = df[feats_available].fillna(0)
     y = df[target].astype(int)
     X_train, X_test, y_train, y_test = train_test_split(
@@ -58,19 +61,23 @@ def run_churn(df):
         'roc': {'fpr': fpr, 'tpr': tpr},
         'feature_importance': dict(zip(feats_available,
                                         model.feature_importances_)),
+        'target': target,
         'churn_rate': y.mean(),
         'train_size': len(X_train),
         'test_size': len(X_test),
     }
 
 # ── LOGISTIC REGRESSION / LEAD SCORING ────────────────────────────
-def run_logit(df):
-    features = ['dias_contacto', 'interacciones_web',
+def run_logit(df, features: list[str] | None = None, target: str | None = None):
+    DEFAULT_FEATURES = ['dias_contacto', 'interacciones_web',
                 'clicks_precio', 'tiempo_pag_min']
-    target = 'convirtio'
-    feats_available = [f for f in features if f in df.columns]
+    target = target or 'convirtio'
+    feats = features if features else DEFAULT_FEATURES
+    feats_available = [f for f in feats if f in df.columns]
     if target not in df.columns:
         return None
+    if not feats_available:
+        return {'error': 'Selecciona al menos una variable disponible en el dataset.'}
     X = df[feats_available].fillna(0)
     y = df[target].astype(int)
 
@@ -109,19 +116,23 @@ def run_logit(df):
         'confusion_matrix': cm,
         'roc': {'fpr': fpr, 'tpr': tpr},
         'coefficients': coef_df,
+        'target': target,
         'conv_rate': y.mean(),
         'train_size': len(X_train),
         'test_size': len(X_test),
     }
 
 # ── LTV / LINEAR REGRESSION ────────────────────────────────────────
-def run_ltv(df):
-    features = ['compras_6m', 'ticket_prom', 'meses_cliente',
+def run_ltv(df, features: list[str] | None = None, target: str | None = None):
+    DEFAULT_FEATURES = ['compras_6m', 'ticket_prom', 'meses_cliente',
                 'categorias', 'canal_digital']
-    target = 'ltv_anual'
-    feats_available = [f for f in features if f in df.columns]
+    target = target or 'ltv_anual'
+    feats = features if features else DEFAULT_FEATURES
+    feats_available = [f for f in feats if f in df.columns]
     if target not in df.columns:
         return None
+    if not feats_available:
+        return {'error': 'Selecciona al menos una variable disponible en el dataset.'}
     X = df[feats_available].fillna(0)
     y = df[target].astype(float)
 
@@ -150,6 +161,7 @@ def run_ltv(df):
         'y_pred': y_pred,
         'metrics': {'r2': r2, 'rmse': rmse, 'mae': mae, 'mape': mape},
         'coefficients': coef_df,
+        'target': target,
         'intercept': model.intercept_,
         'train_size': len(X_train),
         'test_size': len(X_test),
@@ -251,13 +263,16 @@ def run_basket(df, min_support=0.05, min_confidence=0.3, min_lift=1.0):
         return {'error': str(e), 'rules': pd.DataFrame()}
 
 # ── PROPENSIÓN A COMPRA ────────────────────────────────────────────
-def run_propension(df):
-    features = ['recencia_dias', 'n_compras_12m', 'engagement_score',
+def run_propension(df, features: list[str] | None = None, target: str | None = None):
+    DEFAULT_FEATURES = ['recencia_dias', 'n_compras_12m', 'engagement_score',
                 'canal_digital', 'edad', 'n_productos']
-    target = 'compro'
-    feats_available = [f for f in features if f in df.columns]
+    target = target or 'compro'
+    feats = features if features else DEFAULT_FEATURES
+    feats_available = [f for f in feats if f in df.columns]
     if target not in df.columns:
         return None
+    if not feats_available:
+        return {'error': 'Selecciona al menos una variable disponible en el dataset.'}
     X = df[feats_available].fillna(0)
     y = df[target].astype(int)
     X_train, X_test, y_train, y_test = train_test_split(
@@ -287,19 +302,23 @@ def run_propension(df):
         'confusion_matrix': cm,
         'roc': {'fpr': fpr, 'tpr': tpr},
         'feature_importance': dict(zip(feats_available, model.feature_importances_)),
+        'target': target,
         'conv_rate': y.mean(),
         'train_size': len(X_train),
         'test_size': len(X_test),
     }
 
 # ── WIN / LOSS DE OPORTUNIDADES ────────────────────────────────────
-def run_winloss(df):
-    features = ['monto_oportunidad_k', 'dias_ciclo', 'n_reuniones',
+def run_winloss(df, features: list[str] | None = None, target: str | None = None):
+    DEFAULT_FEATURES = ['monto_oportunidad_k', 'dias_ciclo', 'n_reuniones',
                 'n_competidores', 'decision_makers', 'propuesta_personalizada']
-    target = 'ganado'
-    feats_available = [f for f in features if f in df.columns]
+    target = target or 'ganado'
+    feats = features if features else DEFAULT_FEATURES
+    feats_available = [f for f in feats if f in df.columns]
     if target not in df.columns:
         return None
+    if not feats_available:
+        return {'error': 'Selecciona al menos una variable disponible en el dataset.'}
     X = df[feats_available].fillna(0)
     y = df[target].astype(int)
     X_train, X_test, y_train, y_test = train_test_split(
@@ -329,19 +348,23 @@ def run_winloss(df):
         'confusion_matrix': cm,
         'roc': {'fpr': fpr, 'tpr': tpr},
         'feature_importance': dict(zip(feats_available, model.feature_importances_)),
+        'target': target,
         'win_rate': y.mean(),
         'train_size': len(X_train),
         'test_size': len(X_test),
     }
 
 # ── UPLIFT / INCREMENTALIDAD ────────────────────────────────────────
-def run_uplift(df):
-    features = ['edad', 'recencia_dias', 'n_compras_prev', 'ticket_prom_k', 'canal_digital']
+def run_uplift(df, features: list[str] | None = None, target: str | None = None):
+    DEFAULT_FEATURES = ['edad', 'recencia_dias', 'n_compras_prev', 'ticket_prom_k', 'canal_digital']
     treatment_col = 'tratamiento'
-    target = 'convirtio'
-    feats_available = [f for f in features if f in df.columns]
+    target = target or 'convirtio'
+    feats = features if features else DEFAULT_FEATURES
+    feats_available = [f for f in feats if f in df.columns]
     if target not in df.columns or treatment_col not in df.columns:
         return None
+    if not feats_available:
+        return {'error': 'Selecciona al menos una variable disponible en el dataset.'}
 
     treated = df[df[treatment_col] == 1].copy()
     control = df[df[treatment_col] == 0].copy()
@@ -396,19 +419,23 @@ def run_uplift(df):
             'top10_lift': round(top10_lift, 4),
             'qini': round(qini, 4),
         },
+        'target': target,
         'uplift_scores': uplift_scores,
         'train_size': len(treated),
         'test_size': len(control),
     }
 
 # ── NEXT BEST OFFER ────────────────────────────────────────────────
-def run_nbo(df):
-    features = ['tiene_tarjeta', 'tiene_cuenta', 'tiene_seguro',
+def run_nbo(df, features: list[str] | None = None, target: str | None = None):
+    DEFAULT_FEATURES = ['tiene_tarjeta', 'tiene_cuenta', 'tiene_seguro',
                 'tiene_prestamo', 'antiguedad_m', 'saldo_k']
-    target = 'producto_adquirido'
-    feats_available = [f for f in features if f in df.columns]
+    target = target or 'producto_adquirido'
+    feats = features if features else DEFAULT_FEATURES
+    feats_available = [f for f in feats if f in df.columns]
     if target not in df.columns:
         return None
+    if not feats_available:
+        return {'error': 'Selecciona al menos una variable disponible en el dataset.'}
 
     le = LabelEncoder()
     X = df[feats_available].fillna(0)
@@ -441,16 +468,18 @@ def run_nbo(df):
         'metrics': {'accuracy': acc, 'f1_macro': f1, 'top2_accuracy': top2_acc},
         'feature_importance': dict(zip(feats_available,
                                         model.feature_importances_)),
+        'target': target,
         'train_size': len(X_train),
         'test_size': len(X_test),
     }
 
 # ── K-MEANS (RFM) ──────────────────────────────────────────────────
-def run_kmeans(df: pd.DataFrame, n_clusters: int = 4) -> dict:
-    features = ['recencia_dias', 'frecuencia_compras', 'monto_total_k']
-    feats = [f for f in features if f in df.columns]
+def run_kmeans(df: pd.DataFrame, n_clusters: int = 4, features: list[str] | None = None) -> dict:
+    DEFAULT_FEATURES = ['recencia_dias', 'frecuencia_compras', 'monto_total_k']
+    feats_in = features if features else DEFAULT_FEATURES
+    feats = [f for f in feats_in if f in df.columns]
     if len(feats) < 2:
-        return {'error': 'Columnas RFM no encontradas'}
+        return {'error': 'Selecciona al menos 2 variables disponibles en el dataset.'}
 
     X_raw = df[feats].fillna(0).values
     scaler = StandardScaler()
@@ -496,17 +525,18 @@ def run_kmeans(df: pd.DataFrame, n_clusters: int = 4) -> dict:
     }
 
 # ── K-MODES ────────────────────────────────────────────────────────
-def run_kmodes(df: pd.DataFrame, n_clusters: int = 3) -> dict:
+def run_kmodes(df: pd.DataFrame, n_clusters: int = 3, features: list[str] | None = None) -> dict:
     try:
         from kmodes.kmodes import KModes
     except ImportError:
         return {'error': 'Instala el paquete: pip install kmodes'}
 
-    features = ['canal_adquisicion', 'categoria_preferida', 'frecuencia_visita',
+    DEFAULT_FEATURES = ['canal_adquisicion', 'categoria_preferida', 'frecuencia_visita',
                 'region', 'edad_grupo', 'dispositivo']
-    feats = [f for f in features if f in df.columns]
+    feats_in = features if features else DEFAULT_FEATURES
+    feats = [f for f in feats_in if f in df.columns]
     if len(feats) < 2:
-        return {'error': 'Columnas categóricas no encontradas'}
+        return {'error': 'Selecciona al menos 2 variables disponibles en el dataset.'}
 
     X = df[feats].fillna('Desconocido').values
 
@@ -613,15 +643,16 @@ def run_prophet(df: pd.DataFrame, test_days: int = 30,
 
 # ── CLUSTERING JERÁRQUICO ──────────────────────────────────────────
 def run_hierarchical(df: pd.DataFrame, n_clusters: int = 4,
-                     linkage: str = 'ward') -> dict:
+                     linkage: str = 'ward', features: list[str] | None = None) -> dict:
     from scipy.cluster.hierarchy import linkage as sp_linkage, cophenet
     from scipy.spatial.distance import pdist
 
-    features = ['recencia_dias', 'frecuencia_compras', 'ticket_prom_k',
+    DEFAULT_FEATURES = ['recencia_dias', 'frecuencia_compras', 'ticket_prom_k',
                 'n_categorias', 'meses_cliente', 'canal_digital']
-    feats = [f for f in features if f in df.columns]
+    feats_in = features if features else DEFAULT_FEATURES
+    feats = [f for f in feats_in if f in df.columns]
     if len(feats) < 2:
-        return {'error': 'Columnas de comportamiento no encontradas'}
+        return {'error': 'Selecciona al menos 2 variables disponibles en el dataset.'}
 
     X_raw = df[feats].fillna(0).values
     scaler = StandardScaler()
